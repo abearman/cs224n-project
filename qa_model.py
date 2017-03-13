@@ -157,6 +157,7 @@ class QASystem(object):
 				# Create a handle to loss and train_op
 				self.loss = None	
 				self.train_op = None
+				self.grad_norm = None
 
 				# kwargs passed in
 				self.embed_path = kwargs['embed_path']
@@ -237,6 +238,9 @@ class QASystem(object):
 				# Re-zip the gradients and params
 				grads_and_params = zip(gradients, params)
 
+				# Compute the resultant global norm of the gradients and set self.grad_norm
+				self.grad_norm = tf.global_norm(grads_and_params)
+
 				# Create the training operation by calling optimizer.apply_gradients
 				self.train_op = opt.apply_gradients(grads_and_params)
 				#self.train_op = get_optimizer(self.optimizer)(learning_rate=self.learning_rate).minimize(self.loss)
@@ -284,8 +288,8 @@ class QASystem(object):
 				print("Question mask batch: ", self.question_mask_placeholder)
 				print("Context mask batch: ", self.context_mask_placeholder)
 
-				_, loss = session.run([self.train_op, self.loss], feed_dict=feed)
-				return loss 
+				_, loss, grad_norm = session.run([self.train_op, self.loss, self.grad_norm], feed_dict=feed)
+				return loss, grad_norm
 
 
 		def test(self, session, valid_x, valid_y):
@@ -463,8 +467,8 @@ class QASystem(object):
 		# Each batch only has training examples (no val examples).
 		def run_epoch(self, session, train_examples):
 				for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
-						loss = self.optimize(session, batch)	
-						print("Loss: ", loss)
+						loss, grad_norm = self.optimize(session, batch)	
+						print("Loss: ", loss, " , grad norm: ", grad_norm)
 
 		# Partitioning code from: 
 		# http://stackoverflow.com/questions/2659900/python-slicing-a-list-into-n-nearly-equal-length-partitions
