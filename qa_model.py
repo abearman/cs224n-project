@@ -383,9 +383,8 @@ class QASystem(object):
 
 				for epoch in range(self.epochs):
 					logging.info("Epoch %d out of %d", epoch + 1, self.config.n_epochs)
-					self.run_epoch(session, dataset) 
+					self.run_epoch(session, dataset['train'], dataset['val']) 
 
-					#training_op = get_optimizer(self.optimizer)(self.learning_rate)
 					#feed = self.create_feed_dict(inputs_batch, labels_batch=labels_batch) 
 
 					tic = time.time()
@@ -393,3 +392,17 @@ class QASystem(object):
 					num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
 					toc = time.time()
 					logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
+
+	
+		# A single training example is a triplet: (question, context, answer). Each entry 
+		# of the triplet is a list of word IDs.
+		def run_epoch(self, session, train_examples, val_examples):
+				for i, batch in enumerate(minibatches(train_examples, self.batch_size)):
+						pass
+
+
+		def minibatches(data, batch_size, shuffle=True):
+				print(len(data))
+
+
+

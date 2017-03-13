@@ -76,9 +76,30 @@ def get_normalized_train_dir(train_dir):
 		return global_train_dir
 
 
+def process_data_file(filepath):
+		lines = open(FLAGS.data_dir + '/' + filepath).read().splitlines()
+		data_arr = []
+		for line in lines:
+			data_arr.append([int(word) for word in line.split(' ')])
+		return data_arr
+
+
+def load_dataset():
+		train_dict = {"question": process_data_file("/train.ids.question"),
+								  "context": process_data_file("/train.ids.context"), 
+									"answer": process_data_file("/train.span")}
+
+		val_dict = {"question": process_data_file("/val.ids.question"),
+								"context": process_data_file("/val.ids.context"),
+								"answer": process_data_file("/val.span")}
+
+		data_dict = {"train": train_dict, "val": val_dict}
+		return data_dict 
+
+
 def main(_):
 		# Do what you need to load datasets from FLAGS.data_dir
-		dataset = None
+		dataset = load_dataset() 
 
 		embed_path = FLAGS.embed_path or pjoin("data", "squad", "glove.trimmed.{}.npz".format(FLAGS.embedding_size))
 		vocab_path = FLAGS.vocab_path or pjoin(FLAGS.data_dir, "vocab.dat")
