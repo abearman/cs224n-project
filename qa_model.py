@@ -166,6 +166,7 @@ class QASystem(object):
 				self.learning_rate = kwargs['learning_rate']
 				self.epochs = kwargs['epochs']
 				self.batch_size = kwargs['batch_size']
+				self.max_gradient_norm = kwargs['max_gradient_norm']
 
 				# ==== set up placeholder tokens ========
 				self.question_input_placeholder = tf.placeholder(tf.int32, (None, self.max_question_len))
@@ -185,7 +186,7 @@ class QASystem(object):
 						self.setup_loss()  # Equivalent to: self.add_loss_op(self.pred) and self.add_training_op(self.loss) 
 
 				# ==== set up training/updating procedure ====
-				self.train_op = get_optimizer(self.optimizer)(learning_rate=self.learning_rate).minimize(self.loss)
+				self.setup_training_op()
 
 
 		def setup_system(self):
@@ -217,6 +218,28 @@ class QASystem(object):
 					l1 = sparse_softmax_cross_entropy_with_logits(self.a_s_probs, start_answer)
 					l2 = sparse_softmax_cross_entropy_with_logits(self.a_e_probs, end_answer)
 					self.loss = l1 + l2 
+
+		def setup_training_op(self):
+				"""
+				Sets up the training ops.
+
+				Creates an optimizer and applies the gradients to all trainable variables.
+				Clips the global norm of the gradients.
+				"""
+				opt = get_optimizer(self.optimizer)(learning_rate=self.learning_rate)
+
+				# Get the gradients using optimizer.compute_gradients
+				gradients, params = zip(*opt.compute_gradients(self.loss))
+
+				# Clip the gradients to self.max_gradient_norm
+				gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
+	
+				# Re-zip the gradients and params
+				grads_and_params = zip(gradients, params)
+
+				# Create the training operation by calling optimizer.apply_gradients
+				self.train_op = opt.apply_gradients(grads_and_params)
+				#self.train_op = get_optimizer(self.optimizer)(learning_rate=self.learning_rate).minimize(self.loss)
 
 
 		def setup_embeddings(self):

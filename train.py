@@ -112,7 +112,7 @@ def main(_):
 		qa_args = {"embed_path": embed_path, "embedding_size": FLAGS.embedding_size,
 							 "output_size": FLAGS.output_size, "optimizer": FLAGS.optimizer,
 							 "learning_rate": FLAGS.learning_rate, "epochs": FLAGS.epochs,
-							 "batch_size": FLAGS.batch_size}
+							 "batch_size": FLAGS.batch_size, "max_gradient_norm": FLAGS.max_gradient_norm}
 		qa = QASystem(encoder, decoder, **qa_args)
 
 		if not os.path.exists(FLAGS.log_dir):
