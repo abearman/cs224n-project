@@ -139,7 +139,7 @@ class QASystem(object):
 				"""
 				# Dataset constants
 				self.max_question_len = 60		# Longest question sequence to parse (in train or val set)
-				self.max_context_len = 766		# Longest context sequence to parse (in train or val set)
+				self.max_context_len = 750 		# Longest context sequence to parse (in train or val set): (766, truncated at 750)
 				self.max_answer_len = 46			# Longest answer sequence to parse (in train or val set)
 				self.n_classes = 2						# O or ANSWER
 
@@ -294,6 +294,8 @@ class QASystem(object):
 				print("Context mask batch: ", self.context_mask_placeholder)
 
 				_, loss, grad_norm = session.run([self.train_op, self.loss, self.grad_norm], feed_dict=feed)
+				print("a_s probs: ", self.a_s_probs)
+				print("a_e probs: ", self.a_e_probs)
 				return loss, grad_norm
 
 
