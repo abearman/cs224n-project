@@ -22,7 +22,7 @@ def plot_histogram(freq_dict, xlabel=''):
 	plt.show()
 
 
-plot_histogram(get_frequency_dict('../data/squad/train.question'), xlabel='Question length')
+#plot_histogram(get_frequency_dict('../data/squad/train.question'), xlabel='Question length')
 plot_histogram(get_frequency_dict('../data/squad/train.context'), xlabel='Context length')
-plot_histogram(get_frequency_dict('../data/squad/train.answer'), xlabel='Answer length')
+#plot_histogram(get_frequency_dict('../data/squad/train.answer'), xlabel='Answer length')
 
