@@ -75,6 +75,7 @@ class Encoder(object):
 					# Encode question
 					with vs.variable_scope("question", True):			
 						lstm_cell = tf.nn.rnn_cell.LSTMCell(self.state_size)	# Should be 1 at first, then 200
+						lstm_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=self.dropout_keep_prob)
 						question_length = tf.reduce_sum(tf.cast(question_mask, tf.int32), reduction_indices=1)	
 						print("Question length: ", question_length)
 						(fw_out, bw_out), _ = bidirectional_dynamic_rnn(lstm_cell, lstm_cell, 
@@ -168,6 +169,7 @@ class QASystem(object):
 				self.epochs = kwargs['epochs']
 				self.batch_size = kwargs['batch_size']
 				self.max_gradient_norm = kwargs['max_gradient_norm']
+				self.dropout_keep_prob = kwargs['dropout_keep_prob']
 
 				# ==== set up placeholder tokens ========
 				self.question_input_placeholder = tf.placeholder(tf.int32, (None, self.max_question_len))
@@ -267,7 +269,7 @@ class QASystem(object):
 
 		# This function is like "train_on_batch" in Assignment 3
 		# train_x is like inputs_batch, and train_y is like labels_batch
-		def optimize(self, session, train_batch):
+		def optimize(self, session, train_batch, dropout_keep_prob=1):
 				"""
 				Takes in actual data to optimize your model
 				This method is equivalent to a step() function
@@ -281,6 +283,7 @@ class QASystem(object):
 				feed[self.question_mask_placeholder] = question_mask_batch
 				feed[self.context_mask_placeholder] = context_mask_batch
 				feed[self.labels_placeholder] = answer_batch
+				feed[self.dropout_placeholder] = dropout_keep_prob
 
 				print("Question batch: ", self.question_input_placeholder)
 				print("Context batch: ", self.context_input_placeholder)
@@ -467,7 +470,7 @@ class QASystem(object):
 		# Each batch only has training examples (no val examples).
 		def run_epoch(self, session, train_examples):
 				for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
-						loss, grad_norm = self.optimize(session, batch)	
+						loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob)	
 						print("Loss: ", loss, " , grad norm: ", grad_norm)
 
 		# Partitioning code from: 
