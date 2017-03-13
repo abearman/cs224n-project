@@ -55,7 +55,8 @@ class Encoder(object):
 				self.state_size = state_size
 				self.embedding_size = embedding_size 
 
-		def encode(self, question_embeddings, context_embeddings, question_mask, context_mask, encoder_state_input):
+		def encode(self, question_embeddings, context_embeddings, question_mask, context_mask, 
+							 encoder_state_input, dropout_keep_prob):
 				"""
 				In a generalized encode function, you pass in your inputs,
 				masks, and an initial
@@ -75,7 +76,7 @@ class Encoder(object):
 					# Encode question
 					with vs.variable_scope("question", True):			
 						lstm_cell = tf.nn.rnn_cell.LSTMCell(self.state_size)	# Should be 1 at first, then 200
-						lstm_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=self.dropout_keep_prob)
+						lstm_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=dropout_keep_prob)
 						question_length = tf.reduce_sum(tf.cast(question_mask, tf.int32), reduction_indices=1)	
 						print("Question length: ", question_length)
 						(fw_out, bw_out), _ = bidirectional_dynamic_rnn(lstm_cell, lstm_cell, 
@@ -201,7 +202,8 @@ class QASystem(object):
 				"""	
 				# Set up prediction op	
 				h_q, h_p = self.encoder.encode(self.question_embeddings, self.context_embeddings, 
-																			 self.question_mask_placeholder, self.context_mask_placeholder, None)
+																			 self.question_mask_placeholder, self.context_mask_placeholder, 
+																			 None, self.dropout_keep_prob)
 
 				knowledge_rep = {}
 				knowledge_rep['h_p'] = h_p
