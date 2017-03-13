@@ -166,8 +166,8 @@ class QASystem(object):
 				self.batch_size = kwargs['batch_size']
 
 				# ==== set up placeholder tokens ========
-				self.question_input_placeholder = tf.placeholder(tf.int32, (None, self.max_question_len, 1))
-				self.context_input_placeholder = tf.placeholder(tf.int32, (None, self.max_context_len, 1))
+				self.question_input_placeholder = tf.placeholder(tf.int32, (None, self.max_question_len))
+				self.context_input_placeholder = tf.placeholder(tf.int32, (None, self.max_context_len))
 
 				self.question_mask_placeholder = tf.placeholder(tf.bool, (None, self.max_question_len))
 				self.context_mask_placeholder = tf.placeholder(tf.bool, (None, self.max_context_len))
@@ -246,16 +246,15 @@ class QASystem(object):
 				This method is equivalent to a step() function
 				:return:
 				"""
-				question_batch, context_batch, answers_batch = zip(*train_batch)
+				question_batch, context_batch, answer_batch, question_mask_batch, context_mask_batch = zip(*train_batch)
+				print("Len question batch: ", len(question_batch))
 
 				feed = {}
 				feed[self.question_input_placeholder] = question_batch
 				feed[self.context_input_placeholder] = context_batch
-				feed[self.labels_placeholder] = answers_batch
-
-				print("Len question batch: ", len(question_batch))
-				print("Len context batch: ", len(context_batch))
-				print("Len answers batch: ", len(answers_batch))	
+				feed[self.question_mask_placeholder] = question_mask_batch
+				feed[self.context_mask_placeholder] = context_mask_batch
+				feed[self.labels_placeholder] = answer_batch
 
 				_, loss = session.run([self.train_op, self.loss], feed_dict=feed)
 				return loss 
@@ -379,12 +378,15 @@ class QASystem(object):
 				# you will also want to save your model parameters in train_dir
 				# so that you can use your trained model to make predictions, or
 				# even continue training
+
+				dataset = self.pad_dataset(dataset)
+
 				init = tf.global_variables_initializer() 
 				session.run(init)
 
 				for epoch in range(self.epochs):
 					logging.info("Epoch %d out of %d", epoch + 1, self.epochs)
-					self.run_epoch(session, dataset['train'], dataset['val']) 
+					self.run_epoch(session, dataset['train'])
 
 					tic = time.time()
 					params = tf.trainable_variables()
@@ -392,12 +394,46 @@ class QASystem(object):
 					toc = time.time()
 					logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
 
-	
+		
+		# Some more preprocessing to make all the questions and context sequences the same length.
+		def pad_dataset(self, dataset):
+			for data_subset_name in ['train', 'val']:
+				# Iterate over each triplet in the dataset (train or val)
+				for i in range(len(dataset[data_subset_name])):  
+					# Pad the question and context sequence to their respective max lengths
+					# Do this in place in the dataset
+					question = dataset[data_subset_name][i][0]
+					context = dataset[data_subset_name][i][1]
+					answer = dataset[data_subset_name][i][2]
+
+					padded_question, question_mask = self.pad_sequence(question, self.max_question_len)
+					padded_context, context_mask = self.pad_sequence(context, self.max_context_len)
+
+					dataset[data_subset_name][i] = (padded_question, padded_context, answer, question_mask, context_mask)
+ 
+			return dataset
+
+
+		def pad_sequence(self, sequence, max_length):
+			new_sequence = []
+			mask = []
+
+			if len(sequence) >= max_length:  # Truncate (or fill exactly)
+				new_sequence = sequence[0:max_length]
+				mask = [True] * max_length
+
+			elif len(sequence) < max_length:	# Append 0's
+				delta = max_length - len(sequence)
+				new_sequence = sequence + ([0]*delta)
+				mask = ([True] * len(sequence)) + ([False] * delta)
+
+			return (new_sequence, mask)
+
 	
 		# A single training example is a triplet: (question, context, answer). Each entry 
 		# of the triplet is a list of word IDs.
 		# Each batch only has training examples (no val examples).
-		def run_epoch(self, session, train_examples, val_examples):
+		def run_epoch(self, session, train_examples):
 				for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
 						loss = self.optimize(session, batch)	
 						logging.info("Loss: ", loss)

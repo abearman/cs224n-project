@@ -85,6 +85,7 @@ def process_data_file(filepath):
 
 
 def load_dataset():
+		# train_tuples and val_tuples are both lists of triplets: (question, context, answer)
 		train_tuples = zip(process_data_file("/train.ids.question"),
 	 	 						  		 process_data_file("/train.ids.context"), 
 											 process_data_file("/train.span"))
