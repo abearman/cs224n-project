@@ -92,8 +92,6 @@ class Encoder(object):
 					with vs.variable_scope("context", True):
 						# Encode context paragraph
 						context_length = tf.reduce_sum(tf.cast(context_mask, tf.int32), reduction_indices=1)
-						question_length = tf.reduce_sum(tf.cast(question_mask, tf.int32), reduction_indices=1)
-						print("Question length: ", question_length)
 						print("Context length: ", context_length)
 						attn_cell = GRUAttnCell(self.state_size, H_q)  
 						H_p, _ = dynamic_rnn(attn_cell, context_embeddings, sequence_length=context_length, dtype=tf.float64)
@@ -262,8 +260,6 @@ class QASystem(object):
 				print("Answer batch: ", self.labels_placeholder)
 				print("Question mask batch: ", self.question_mask_placeholder)
 				print("Context mask batch: ", self.context_mask_placeholder)
-
-				print("Question mask batch len: ", len(question_mask_batch))
 
 				_, loss = session.run([self.train_op, self.loss], feed_dict=feed)
 				return loss 
@@ -445,7 +441,7 @@ class QASystem(object):
 		def run_epoch(self, session, train_examples):
 				for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
 						loss = self.optimize(session, batch)	
-						logging.info("Loss: ", loss)
+						print("Loss: ", loss)
 
 		# Partitioning code from: 
 		# http://stackoverflow.com/questions/2659900/python-slicing-a-list-into-n-nearly-equal-length-partitions
