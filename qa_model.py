@@ -5,6 +5,7 @@ from __future__ import print_function
 import time
 import logging
 import random
+import math
 
 import numpy as np
 from six.moves import xrange	# pylint: disable=redefined-builtin
@@ -241,13 +242,15 @@ class QASystem(object):
 
 		# This function is like "train_on_batch" in Assignment 3
 		# train_x is like inputs_batch, and train_y is like labels_batch
-		def optimize(self, session, train_x, train_y):
+		def optimize(self, session, train_batch):
 				"""
 				Takes in actual data to optimize your model
 				This method is equivalent to a step() function
 				:return:
 				"""
 				feed_dict = {}
+				#print("Train batch: ", train_batch)
+				print(len(train_batch))	
 
 				# fill in this feed_dictionary like:
 				feed_dict['train_x'] = train_x
@@ -386,8 +389,6 @@ class QASystem(object):
 					logging.info("Epoch %d out of %d", epoch + 1, self.epochs)
 					self.run_epoch(session, dataset['train'], dataset['val']) 
 
-					#feed = self.create_feed_dict(inputs_batch, labels_batch=labels_batch) 
-
 					tic = time.time()
 					params = tf.trainable_variables()
 					num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
@@ -398,9 +399,11 @@ class QASystem(object):
 	
 		# A single training example is a triplet: (question, context, answer). Each entry 
 		# of the triplet is a list of word IDs.
+		# Each batch only has training examples (no val examples).
 		def run_epoch(self, session, train_examples, val_examples):
 				for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
-						pass
+						print("Batch size: ", len(batch))
+						loss = self.optimize(session, batch)	
 
 
 		# Partitioning code from: 
@@ -408,9 +411,10 @@ class QASystem(object):
 		def minibatches(self, data, batch_size, shuffle=True):
 				if shuffle:
 					random.shuffle(data)
-				q, r = divmod(len(data), batch_size)
-				indices = [q*i + min(i, r) for i in xrange(batch_size+1)]
-				return [data[indices[i]:indices[i+1]] for i in xrange(batch_size)]
+				num_batches = int(math.ceil(len(data) / batch_size))
+				q, r = divmod(len(data), num_batches)
+				indices = [q*i + min(i, r) for i in xrange(num_batches+1)]
+				return [data[indices[i]:indices[i+1]] for i in xrange(num_batches)]
 
 
 
