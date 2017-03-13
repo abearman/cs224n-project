@@ -143,6 +143,9 @@ class QASystem(object):
 				self.max_answer_len = 46			# Longest answer sequence to parse (in train or val set)
 				self.n_classes = 2						# O or ANSWER
 
+				# Model saver
+				self.saver = None 
+
 				# Encoder and decoder
 				self.encoder = encoder
 				self.decoder = decoder
@@ -171,6 +174,7 @@ class QASystem(object):
 				self.batch_size = kwargs['batch_size']
 				self.max_gradient_norm = kwargs['max_gradient_norm']
 				self.dropout_keep_prob = kwargs['dropout_keep_prob']
+				self.train_dir = kwargs['train_dir']
 
 				# ==== set up placeholder tokens ========
 				self.question_input_placeholder = tf.placeholder(tf.int32, (None, self.max_question_len))
@@ -422,10 +426,14 @@ class QASystem(object):
 
 				init = tf.global_variables_initializer() 
 				session.run(init)
+				self.saver.save(session, self.train_dir + "/baseline_model_0") 
 
 				for epoch in range(self.epochs):
 					logging.info("Epoch %d out of %d", epoch + 1, self.epochs)
 					self.run_epoch(session, dataset['train'])
+
+					# Save model
+					self.saver.save(session, self.train_dir + "/baseline_model_" + str(epoch))
 
 					tic = time.time()
 					params = tf.trainable_variables()
@@ -474,6 +482,7 @@ class QASystem(object):
 		# Each batch only has training examples (no val examples).
 		def run_epoch(self, session, train_examples):
 				for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
+						print("Answer spans: ", [fiveTuple[3] for fiveTuple in batch])
 						loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob)	
 						print("Loss: ", loss, " , grad norm: ", grad_norm)
 
