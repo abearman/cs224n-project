@@ -139,7 +139,7 @@ class QASystem(object):
 				"""
 				# Dataset constants
 				self.max_question_len = 60		# Longest question sequence to parse (in train or val set)
-				self.max_context_len = 750 		# Longest context sequence to parse (in train or val set): (766, truncated at 750)
+				self.max_context_len = 766		# Longest context sequence to parse (in train or val set): (766, truncated at 750)
 				self.max_answer_len = 46			# Longest answer sequence to parse (in train or val set)
 				self.n_classes = 2						# O or ANSWER
 
@@ -281,7 +281,7 @@ class QASystem(object):
 				This method is equivalent to a step() function
 				:return:
 				"""
-				question_batch, context_batch, answer_batch, question_mask_batch, context_mask_batch = zip(*train_batch)
+				question_batch, context_batch, question_mask_batch, context_mask_batch, answer_batch = zip(*train_batch)
 
 				feed = {}
 				feed[self.question_input_placeholder] = question_batch
@@ -456,7 +456,7 @@ class QASystem(object):
 					padded_question, question_mask = self.pad_sequence(question, self.max_question_len)
 					padded_context, context_mask = self.pad_sequence(context, self.max_context_len)
 
-					dataset[data_subset_name][i] = (padded_question, padded_context, answer, question_mask, context_mask)
+					dataset[data_subset_name][i] = (padded_question, padded_context, question_mask, context_mask, answer)
  
 			return dataset
 
@@ -482,7 +482,7 @@ class QASystem(object):
 		# Each batch only has training examples (no val examples).
 		def run_epoch(self, session, train_examples):
 				for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
-						print("Answer spans: ", [fiveTuple[3] for fiveTuple in batch])
+						print("Answer spans: ", [fiveTuple[4] for fiveTuple in batch])
 						loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob)	
 						print("Loss: ", loss, " , grad norm: ", grad_norm)
 
