@@ -183,7 +183,7 @@ class QASystem(object):
 						self.setup_loss()  # Equivalent to: self.add_loss_op(self.pred) and self.add_training_op(self.loss) 
 
 				# ==== set up training/updating procedure ====
-				pass
+				self.train_op = get_optimizer(self.optimizer)(learning_rate=self.learning_rate).minimize(self.loss)
 
 
 		def setup_system(self):
@@ -218,8 +218,6 @@ class QASystem(object):
 					l2 = sparse_softmax_cross_entropy_with_logits(self.a_e_probs, end_answer)
 					self.loss = l1 + l2 
 
-					# Set up training_op (using self.loss)
-					self.train_op = get_optimizer(self.optimizer)(learning_rate=self.learning_rate).minimize(self.loss)
 
 		def setup_embeddings(self):
 				"""
@@ -248,20 +246,19 @@ class QASystem(object):
 				This method is equivalent to a step() function
 				:return:
 				"""
-				feed_dict = {}
-				#print("Train batch: ", train_batch)
-				print(len(train_batch))	
+				question_batch, context_batch, answers_batch = zip(*train_batch)
 
-				# fill in this feed_dictionary like:
-				feed_dict['train_x'] = train_x
-				if train_y is not None: 
-					input_feed['train_y'] = train_y
+				feed = {}
+				feed[self.question_input_placeholder] = question_batch
+				feed[self.context_input_placeholder] = context_batch
+				feed[self.labels_placeholder] = answers_batch
 
-				output_feed = self.decoder.decode(self.knowledge_rep) 
+				print("Len question batch: ", len(question_batch))
+				print("Len context batch: ", len(context_batch))
+				print("Len answers batch: ", len(answers_batch))	
 
-				outputs = session.run(output_feed, feed_dict)
-
-				return outputs
+				_, loss = session.run([self.train_op, self.loss], feed_dict=feed)
+				return loss 
 
 
 		def test(self, session, valid_x, valid_y):
@@ -402,9 +399,8 @@ class QASystem(object):
 		# Each batch only has training examples (no val examples).
 		def run_epoch(self, session, train_examples, val_examples):
 				for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
-						print("Batch size: ", len(batch))
 						loss = self.optimize(session, batch)	
-
+						logging.info("Loss: ", loss)
 
 		# Partitioning code from: 
 		# http://stackoverflow.com/questions/2659900/python-slicing-a-list-into-n-nearly-equal-length-partitions
