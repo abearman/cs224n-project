@@ -55,7 +55,7 @@ class Encoder(object):
 				self.state_size = state_size
 				self.embedding_size = embedding_size 
 
-		def encode(self, inputs, question_mask, context_mask, encoder_state_input):
+		def encode(self, question_embeddings, context_embeddings, question_mask, context_mask, encoder_state_input):
 				"""
 				In a generalized encode function, you pass in your inputs,
 				masks, and an initial
@@ -70,34 +70,38 @@ class Encoder(object):
 								 It can be context-level representation, word-level representation,
 								 or both.
 				"""
-				# Encode question
-				question_inputs = inputs['question']
-				print("question inputs: ", question_inputs)
-				question_length = tf.reduce_sum(tf.cast(question_mask, tf.int32), reduction_indices=0)
-				lstm_cell = tf.nn.rnn_cell.LSTMCell(self.state_size)	# Should be 1 at first, then 200
-				(fw_out, bw_out), _ = bidirectional_dynamic_rnn(lstm_cell, lstm_cell, 
-							question_inputs, sequence_length=question_length,
-							time_major=True, dtype=tf.float64)
-				last_fw = fw_out[:,-1,:]
-				print("last fw: ", last_fw)
-				#h_q = tf.concat(1, [fw_out[:,-1,:], bw_out[:,-1,:]])
-				h_q = fw_out[:,-1,:] + bw_out[:,-1,:]
-				print("h_q: ", h_q)
-				#H_q = tf.concat(2, [fw_out, bw_out])
-				H_q = fw_out + bw_out
-				print("H_q: ", H_q)
+				with vs.variable_scope("encoder", True):
 
-				# Encode context paragraph
-				context_inputs = inputs['context']
-				context_length = tf.reduce_sum(tf.cast(context_mask, tf.int32), reduction_indices=0)
-				attn_cell = GRUAttnCell(self.state_size, H_q)  
-				with vs.variable_scope("encoder", True):	# reuse
-					H_p, _ = dynamic_rnn(attn_cell, inputs['context'], sequence_length=context_length, dtype=tf.float64)
-				h_p = H_p[:,-1,:]
+					# Encode question
+					with vs.variable_scope("question", True):			
+						lstm_cell = tf.nn.rnn_cell.LSTMCell(self.state_size)	# Should be 1 at first, then 200
+						question_length = tf.reduce_sum(tf.cast(question_mask, tf.int32), reduction_indices=1)	
+						print("Question length: ", question_length)
+						(fw_out, bw_out), _ = bidirectional_dynamic_rnn(lstm_cell, lstm_cell, 
+									question_embeddings, sequence_length=question_length,
+									time_major=False, dtype=tf.float64, swap_memory=True)  #TODO: time_major=True was causing seg faults
+						last_fw = fw_out[:,-1,:]
+						print("last fw: ", last_fw)
+						#h_q = tf.concat(1, [fw_out[:,-1,:], bw_out[:,-1,:]])
+						h_q = fw_out[:,-1,:] + bw_out[:,-1,:]
+						print("h_q: ", h_q)
+						#H_q = tf.concat(2, [fw_out, bw_out])
+						H_q = fw_out + bw_out
+						print("H_q: ", H_q)
 
-				print("h_q: ", h_q)
-				print("h_p: ", h_p)
-				return h_q, h_p
+					with vs.variable_scope("context", True):
+						# Encode context paragraph
+						context_length = tf.reduce_sum(tf.cast(context_mask, tf.int32), reduction_indices=1)
+						question_length = tf.reduce_sum(tf.cast(question_mask, tf.int32), reduction_indices=1)
+						print("Question length: ", question_length)
+						print("Context length: ", context_length)
+						attn_cell = GRUAttnCell(self.state_size, H_q)  
+						H_p, _ = dynamic_rnn(attn_cell, context_embeddings, sequence_length=context_length, dtype=tf.float64)
+						h_p = H_p[:,-1,:]
+
+					print("h_q: ", h_q)
+					print("h_p: ", h_p)
+					return h_q, h_p
 
 class Decoder(object):
 		def __init__(self, output_size):
@@ -194,10 +198,8 @@ class QASystem(object):
 				:return:
 				"""	
 				# Set up prediction op	
-				inputs = {}
-				inputs['question'] = self.question_embeddings 
-				inputs['context'] = self.context_embeddings
-				h_q, h_p = self.encoder.encode(inputs, self.question_mask_placeholder, self.context_mask_placeholder, None)
+				h_q, h_p = self.encoder.encode(self.question_embeddings, self.context_embeddings, 
+																			 self.question_mask_placeholder, self.context_mask_placeholder, None)
 
 				knowledge_rep = {}
 				knowledge_rep['h_p'] = h_p
@@ -247,7 +249,6 @@ class QASystem(object):
 				:return:
 				"""
 				question_batch, context_batch, answer_batch, question_mask_batch, context_mask_batch = zip(*train_batch)
-				print("Len question batch: ", len(question_batch))
 
 				feed = {}
 				feed[self.question_input_placeholder] = question_batch
@@ -255,6 +256,14 @@ class QASystem(object):
 				feed[self.question_mask_placeholder] = question_mask_batch
 				feed[self.context_mask_placeholder] = context_mask_batch
 				feed[self.labels_placeholder] = answer_batch
+
+				print("Question batch: ", self.question_input_placeholder)
+				print("Context batch: ", self.context_input_placeholder)
+				print("Answer batch: ", self.labels_placeholder)
+				print("Question mask batch: ", self.question_mask_placeholder)
+				print("Context mask batch: ", self.context_mask_placeholder)
+
+				print("Question mask batch len: ", len(question_mask_batch))
 
 				_, loss = session.run([self.train_op, self.loss], feed_dict=feed)
 				return loss 
