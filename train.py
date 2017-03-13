@@ -85,15 +85,15 @@ def process_data_file(filepath):
 
 
 def load_dataset():
-		train_dict = {"question": process_data_file("/train.ids.question"),
-								  "context": process_data_file("/train.ids.context"), 
-									"answer": process_data_file("/train.span")}
+		train_tuples = zip(process_data_file("/train.ids.question"),
+	 	 						  		 process_data_file("/train.ids.context"), 
+											 process_data_file("/train.span"))
 
-		val_dict = {"question": process_data_file("/val.ids.question"),
-								"context": process_data_file("/val.ids.context"),
-								"answer": process_data_file("/val.span")}
+		val_tuples = zip(process_data_file("/val.ids.question"),
+										 process_data_file("/val.ids.context"),
+										 process_data_file("/val.span"))
 
-		data_dict = {"train": train_dict, "val": val_dict}
+		data_dict = {"train": train_tuples, "val": val_tuples}
 		return data_dict 
 
 

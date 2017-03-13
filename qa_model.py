@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import time
 import logging
+import random
 
 import numpy as np
 from six.moves import xrange	# pylint: disable=redefined-builtin
@@ -382,7 +383,7 @@ class QASystem(object):
 				session.run(init)
 
 				for epoch in range(self.epochs):
-					logging.info("Epoch %d out of %d", epoch + 1, self.config.n_epochs)
+					logging.info("Epoch %d out of %d", epoch + 1, self.epochs)
 					self.run_epoch(session, dataset['train'], dataset['val']) 
 
 					#feed = self.create_feed_dict(inputs_batch, labels_batch=labels_batch) 
@@ -394,15 +395,22 @@ class QASystem(object):
 					logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
 
 	
+	
 		# A single training example is a triplet: (question, context, answer). Each entry 
 		# of the triplet is a list of word IDs.
 		def run_epoch(self, session, train_examples, val_examples):
-				for i, batch in enumerate(minibatches(train_examples, self.batch_size)):
+				for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
 						pass
 
 
-		def minibatches(data, batch_size, shuffle=True):
-				print(len(data))
+		# Partitioning code from: 
+		# http://stackoverflow.com/questions/2659900/python-slicing-a-list-into-n-nearly-equal-length-partitions
+		def minibatches(self, data, batch_size, shuffle=True):
+				if shuffle:
+					random.shuffle(data)
+				q, r = divmod(len(data), batch_size)
+				indices = [q*i + min(i, r) for i in xrange(batch_size+1)]
+				return [data[indices[i]:indices[i+1]] for i in xrange(batch_size)]
 
 
 
