@@ -84,18 +84,18 @@ class Encoder(object):
 								time_major=False, dtype=tf.float64, swap_memory=True)  #TODO: time_major=True was causing seg faults
 					last_fw = fw_out[:,-1,:]
 					print("last fw: ", last_fw)
-					#h_q = tf.concat(1, [fw_out[:,-1,:], bw_out[:,-1,:]])
-					h_q = fw_out[:,-1,:] + bw_out[:,-1,:]
+					h_q = tf.concat(1, [fw_out[:,-1,:], bw_out[:,-1,:]])
+					#h_q = fw_out[:,-1,:] + bw_out[:,-1,:]
 					print("h_q after: ", h_q)
-					#H_q = tf.concat(2, [fw_out, bw_out])
-					H_q = fw_out + bw_out
+					H_q = tf.concat(2, [fw_out, bw_out])
+					#H_q = fw_out + bw_out
 					print("H_q: ", H_q)
 	
 					#with vs.variable_scope("context", True):
 						# Encode context paragraph
 					context_length = tf.reduce_sum(tf.cast(context_mask, tf.int32), reduction_indices=1)
 					print("Context length: ", context_length)
-					attn_cell = GRUAttnCell(self.state_size, H_q)  
+					attn_cell = GRUAttnCell(2* self.state_size, H_q)	# TODO: 2* because fw_out and bw_out are concatenated 
 					H_p, _ = dynamic_rnn(attn_cell, context_embeddings, sequence_length=context_length, dtype=tf.float64)
 					h_p = H_p[:,-1,:]
 					print("h_p after: ", h_p)
@@ -136,7 +136,7 @@ class QASystem(object):
 				"""
 				# Dataset constants
 				self.max_question_len = 60		# Longest question sequence to parse (in train or val set)
-				self.max_context_len = 766		# Longest context sequence to parse (in train or val set): (766, truncated at 750)
+				self.max_context_len = 750		# Longest context sequence to parse (in train or val set): (766, truncated at 750)
 				self.max_answer_len = 46			# Longest answer sequence to parse (in train or val set)
 				self.n_classes = 2						# O or ANSWER
 
@@ -160,6 +160,8 @@ class QASystem(object):
 				self.loss = None	
 				self.train_op = None
 				self.grad_norm = None
+				self.gradients = None
+				self.clipped_gradients = None
 
 				# kwargs passed in
 				self.state_size = kwargs['state_size']
@@ -222,6 +224,8 @@ class QASystem(object):
 				"""
 				# The label is a one-hot representation
 				with vs.variable_scope("loss"):
+					print("a_s_probs: ", self.a_s_probs)
+					print("start answer: ", self.start_answer_placeholder)
 					l1 = tf.nn.softmax_cross_entropy_with_logits(logits=self.a_s_probs, labels=self.start_answer_placeholder)
 					l2 = tf.nn.softmax_cross_entropy_with_logits(logits=self.a_e_probs, labels=self.end_answer_placeholder)
 					self.loss = l1 + l2 
@@ -234,23 +238,22 @@ class QASystem(object):
 				Clips the global norm of the gradients.
 				"""
 				# Update learning rate
-				lr = tf.train.exponential_decay(self.initial_learning_rate, self.global_step, 100, 0.96)
-
+				lr = tf.train.exponential_decay(self.initial_learning_rate, self.global_step, 1000, 0.96)
 				opt = get_optimizer(self.optimizer)(learning_rate=lr)
 
 				# Get the gradients using optimizer.compute_gradients
-				gradients, params = zip(*opt.compute_gradients(self.loss))
+				self.gradients, params = zip(*opt.compute_gradients(self.loss))
 				for param in params:
 					print("Param: ", param)
 
 				# Clip the gradients to self.max_gradient_norm
-				gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
+				self.clipped_gradients, _ = tf.clip_by_global_norm(self.gradients, self.max_gradient_norm)
 	
 				# Re-zip the gradients and params
-				grads_and_params = zip(gradients, params)
+				grads_and_params = zip(self.clipped_gradients, params)
 
 				# Compute the resultant global norm of the gradients and set self.grad_norm
-				self.grad_norm = tf.global_norm(grads_and_params)
+				self.grad_norm = tf.global_norm(self.clipped_gradients)
 
 				# Create the training operation by calling optimizer.apply_gradients
 				self.train_op = opt.apply_gradients(grads_and_params, global_step=self.global_step)
@@ -295,23 +298,26 @@ class QASystem(object):
 				feed[self.end_answer_placeholder] = end_answer_batch
 				feed[self.dropout_placeholder] = dropout_keep_prob
 
-				print("Question batch: ", self.question_input_placeholder)
-				print("Context batch: ", self.context_input_placeholder)
-				print("Start answer batch: ", self.start_answer_placeholder)
-				print("End answer batch: ", self.end_answer_placeholder)
-				print("Question mask batch: ", self.question_mask_placeholder)
-				print("Context mask batch: ", self.context_mask_placeholder)
-
 				_, loss, grad_norm = session.run([self.train_op, self.loss, self.grad_norm], feed_dict=feed)
 				#_, loss = session.run([self.train_op, self.loss], feed_dict=feed)
-				print("a_s probs: ", self.a_s_probs.eval(feed_dict=feed, session=session))
-				print("a_e probs: ", self.a_e_probs.eval(feed_dict=feed, session=session))
 
-				# qa/answer_start/Linear/Matrix/
-				for param in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES):
-					print(param.name)
-					print(np.unique(param.eval()))
-					print("")
+				#for param in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES):
+				#	print(param.name)
+				#	print(np.unique(param.eval()))
+				#	print("")
+
+				#for grad in self.gradients:
+				#	print(grad.name)
+				#	print(np.unique(grad.eval(feed_dict=feed, session=session)))
+				#	print("")
+					
+				#for clipped_grad in self.clipped_gradients:
+				#	print(clipped_grad.name)
+				#	print(np.unique(clipped_grad.eval(feed_dict=feed, session=session)))
+				#	print("")
+
+				#print("a_s probs: ", self.a_s_probs.eval(feed_dict=feed, session=session))
+				#print("a_e probs: ", self.a_e_probs.eval(feed_dict=feed, session=session))
 
 				#print("h_q: ", self.h_q.eval(feed_dict=feed, session=session))
 				#print("h_p: ", self.h_p.eval(feed_dict=feed, session=session))
@@ -364,10 +370,6 @@ class QASystem(object):
 
 
 		def answer(self, session, test_x):
-				"""
-				Returns the most likely start (a_s) and end (a_e) position 
-				in the context paragraph for each example in a test batch.
-				"""
 
 				yp, yp2 = self.decode(session, test_x)
 
@@ -375,7 +377,6 @@ class QASystem(object):
 				a_e = np.argmax(yp2, axis=1)
 
 				return (a_s, a_e)
-
 
 		def validate(self, sess, valid_dataset):
 				"""
@@ -421,10 +422,10 @@ class QASystem(object):
 				true_answer = [start_answer_batch, end_answer_batch]	
 
 				f1 = f1_score(answer, true_answer)
-				em = exact_match_score(answer, true_answer)
+				em = exact_match_score(answer, true_answer
 
-				#f1 = 0.
-				#em = 0.
+				f1 = 0.
+				em = 0.
 
 				if log:
 						logging.info("F1: {}, EM: {}, for {} samples".format(f1, em, sample))
@@ -533,9 +534,7 @@ class QASystem(object):
 						#loss = self.optimize(session, batch, self.dropout_keep_prob)	
 						print("Loss: ", loss, " , grad norm: ", grad_norm)
 						#print("Loss: ", loss)
-						if (i % 100) == 0:
-							evaluate_answer(self, session, train_examples, sample=100, log=True)
-
+		
 
 		def get_tiny_batches(self, data):
 				return [data[0:10], data[10:20]]
