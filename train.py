@@ -38,6 +38,7 @@ FLAGS = tf.app.flags.FLAGS
 def initialize_model(session, model, train_dir):
 		model.saver = tf.train.Saver()
 		ckpt = tf.train.get_checkpoint_state(train_dir)
+		ckpt = None
 		v2_path = ckpt.model_checkpoint_path + ".index" if ckpt else ""
 		if ckpt and (tf.gfile.Exists(ckpt.model_checkpoint_path) or tf.gfile.Exists(v2_path)):
 				logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
@@ -114,7 +115,7 @@ def main(_):
 							 "output_size": FLAGS.output_size, "optimizer": FLAGS.optimizer,
 							 "learning_rate": FLAGS.learning_rate, "epochs": FLAGS.epochs,
 							 "batch_size": FLAGS.batch_size, "max_gradient_norm": FLAGS.max_gradient_norm,
-							 "dropout_keep_prob": 1.0 - FLAGS.dropout,
+							 "dropout_keep_prob": 1.0,  #1.0 - FLAGS.dropout,
 							 "train_dir": FLAGS.train_dir}
 		qa = QASystem(encoder, decoder, **qa_args)
 

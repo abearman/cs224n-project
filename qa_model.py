@@ -169,7 +169,10 @@ class QASystem(object):
 				self.embedding_size = kwargs['embedding_size']
 				self.output_size = kwargs['output_size']
 				self.optimizer = kwargs['optimizer']	# 'adam' or 'sgd'
-				self.learning_rate = kwargs['learning_rate']
+
+				self.initial_learning_rate = kwargs['learning_rate']
+				self.global_step = tf.Variable(0, trainable=False)	
+
 				self.epochs = kwargs['epochs']
 				self.batch_size = kwargs['batch_size']
 				self.max_gradient_norm = kwargs['max_gradient_norm']
@@ -235,23 +238,26 @@ class QASystem(object):
 				Creates an optimizer and applies the gradients to all trainable variables.
 				Clips the global norm of the gradients.
 				"""
-				opt = get_optimizer(self.optimizer)(learning_rate=self.learning_rate)
+				# Update learning rate
+				lr = tf.train.exponential_decay(self.initial_learning_rate, self.global_step, 100, 0.96)
+
+				#opt = get_optimizer(self.optimizer)(learning_rate=lr)
 
 				# Get the gradients using optimizer.compute_gradients
-				gradients, params = zip(*opt.compute_gradients(self.loss))
+				#gradients, params = zip(*opt.compute_gradients(self.loss))
 
 				# Clip the gradients to self.max_gradient_norm
-				gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
+				#gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
 	
 				# Re-zip the gradients and params
-				grads_and_params = zip(gradients, params)
+				#grads_and_params = zip(gradients, params)
 
 				# Compute the resultant global norm of the gradients and set self.grad_norm
-				self.grad_norm = tf.global_norm(grads_and_params)
+				#self.grad_norm = tf.global_norm(grads_and_params)
 
 				# Create the training operation by calling optimizer.apply_gradients
-				self.train_op = opt.apply_gradients(grads_and_params)
-				#self.train_op = get_optimizer(self.optimizer)(learning_rate=self.learning_rate).minimize(self.loss)
+				#self.train_op = opt.apply_gradients(grads_and_params)
+				self.train_op = get_optimizer(self.optimizer)(learning_rate=lr).minimize(self.loss, global_step=self.global_step)
 
 
 		def setup_embeddings(self):
@@ -297,10 +303,12 @@ class QASystem(object):
 				print("Question mask batch: ", self.question_mask_placeholder)
 				print("Context mask batch: ", self.context_mask_placeholder)
 
-				_, loss, grad_norm = session.run([self.train_op, self.loss, self.grad_norm], feed_dict=feed)
+				#_, loss, grad_norm = session.run([self.train_op, self.loss, self.grad_norm], feed_dict=feed)
+				_, loss = session.run([self.train_op, self.loss], feed_dict=feed)
 				print("a_s probs: ", self.a_s_probs)
 				print("a_e probs: ", self.a_e_probs)
-				return loss, grad_norm
+				# return loss, grad_norm  # TODO
+				return loss
 
 
 		def test(self, session, valid_x, valid_y):
@@ -428,7 +436,7 @@ class QASystem(object):
 				session.run(init)
 				self.saver.save(session, self.train_dir + "/baseline_model_0") 
 
-				for epoch in range(self.epochs):
+				for epoch in range(self.epochs):  
 					logging.info("Epoch %d out of %d", epoch + 1, self.epochs)
 					self.run_epoch(session, dataset['train'])
 
@@ -481,10 +489,19 @@ class QASystem(object):
 		# of the triplet is a list of word IDs.
 		# Each batch only has training examples (no val examples).
 		def run_epoch(self, session, train_examples):
+				#for i, batch in enumerate(self.get_tiny_batches(train_examples)):
 				for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
+						print("Global step: ", self.global_step.eval())
 						print("Answer spans: ", [fiveTuple[4] for fiveTuple in batch])
-						loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob)	
-						print("Loss: ", loss, " , grad norm: ", grad_norm)
+						#loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob)	
+						loss = self.optimize(session, batch, self.dropout_keep_prob)  
+						#print("Loss: ", loss, " , grad norm: ", grad_norm)
+						print("Loss: ", loss)
+		
+
+		def get_tiny_batches(self, data):
+				return [data[0:10], data[10:20]]
+			
 
 		# Partitioning code from: 
 		# http://stackoverflow.com/questions/2659900/python-slicing-a-list-into-n-nearly-equal-length-partitions
