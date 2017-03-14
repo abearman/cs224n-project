@@ -74,40 +74,39 @@ class Encoder(object):
 				with vs.variable_scope("encoder", True):
 
 					# Encode question
-					with vs.variable_scope("question", True):			
-						lstm_cell = tf.nn.rnn_cell.LSTMCell(self.state_size)	# Should be 1 at first, then 200
-						lstm_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=dropout_keep_prob)
-						question_length = tf.reduce_sum(tf.cast(question_mask, tf.int32), reduction_indices=1)	
-						print("Question length: ", question_length)
-						(fw_out, bw_out), _ = bidirectional_dynamic_rnn(lstm_cell, lstm_cell, 
-									question_embeddings, sequence_length=question_length,
-									time_major=False, dtype=tf.float64, swap_memory=True)  #TODO: time_major=True was causing seg faults
-						last_fw = fw_out[:,-1,:]
-						print("last fw: ", last_fw)
-						#h_q = tf.concat(1, [fw_out[:,-1,:], bw_out[:,-1,:]])
-						h_q = fw_out[:,-1,:] + bw_out[:,-1,:]
-						print("h_q: ", h_q)
-						#H_q = tf.concat(2, [fw_out, bw_out])
-						H_q = fw_out + bw_out
-						print("H_q: ", H_q)
-
-					with vs.variable_scope("context", True):
+					#with vs.variable_scope("question", True):			
+					lstm_cell = tf.nn.rnn_cell.LSTMCell(self.state_size)	# Should be 1 at first, then 200
+					lstm_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=dropout_keep_prob)
+					question_length = tf.reduce_sum(tf.cast(question_mask, tf.int32), reduction_indices=1)	
+					print("Question length: ", question_length)
+					(fw_out, bw_out), _ = bidirectional_dynamic_rnn(lstm_cell, lstm_cell, 
+								question_embeddings, sequence_length=question_length,
+								time_major=False, dtype=tf.float64, swap_memory=True)  #TODO: time_major=True was causing seg faults
+					last_fw = fw_out[:,-1,:]
+					print("last fw: ", last_fw)
+					#h_q = tf.concat(1, [fw_out[:,-1,:], bw_out[:,-1,:]])
+					h_q = fw_out[:,-1,:] + bw_out[:,-1,:]
+					print("h_q after: ", h_q)
+					#H_q = tf.concat(2, [fw_out, bw_out])
+					H_q = fw_out + bw_out
+					print("H_q: ", H_q)
+	
+					#with vs.variable_scope("context", True):
 						# Encode context paragraph
-						context_length = tf.reduce_sum(tf.cast(context_mask, tf.int32), reduction_indices=1)
-						print("Context length: ", context_length)
-						attn_cell = GRUAttnCell(self.state_size, H_q)  
-						H_p, _ = dynamic_rnn(attn_cell, context_embeddings, sequence_length=context_length, dtype=tf.float64)
-						h_p = H_p[:,-1,:]
+					context_length = tf.reduce_sum(tf.cast(context_mask, tf.int32), reduction_indices=1)
+					print("Context length: ", context_length)
+					attn_cell = GRUAttnCell(self.state_size, H_q)  
+					H_p, _ = dynamic_rnn(attn_cell, context_embeddings, sequence_length=context_length, dtype=tf.float64)
+					h_p = H_p[:,-1,:]
+					print("h_p after: ", h_p)
 
-					print("h_q: ", h_q)
-					print("h_p: ", h_p)
 					return h_q, h_p
 
 class Decoder(object):
 		def __init__(self, output_size):
 				self.output_size = output_size
 
-		def decode(self, knowledge_rep):
+		def decode(self, h_q, h_p):
 				"""
 				takes in a knowledge representation
 				and output a probability estimation over
@@ -119,8 +118,6 @@ class Decoder(object):
 															decided by how you choose to implement the encoder
 				:return:
 				"""
-				h_q = knowledge_rep["h_q"]
-				h_p = knowledge_rep["h_p"]
 				with vs.variable_scope("answer_start"):
 					a_s = rnn_cell._linear([h_q, h_p], self.output_size, True, 1.0)
 				with vs.variable_scope("answer_end"):
@@ -165,6 +162,7 @@ class QASystem(object):
 				self.grad_norm = None
 
 				# kwargs passed in
+				self.state_size = kwargs['state_size']
 				self.embed_path = kwargs['embed_path']
 				self.embedding_size = kwargs['embedding_size']
 				self.output_size = kwargs['output_size']
@@ -214,11 +212,7 @@ class QASystem(object):
 				h_q, h_p = self.encoder.encode(self.question_embeddings, self.context_embeddings, 
 																			 self.question_mask_placeholder, self.context_mask_placeholder, 
 																			 None, self.dropout_keep_prob)
-
-				knowledge_rep = {}
-				knowledge_rep['h_p'] = h_p
-				knowledge_rep['h_q'] = h_q
-				self.a_s_probs, self.a_e_probs = self.decoder.decode(knowledge_rep)
+				self.a_s_probs, self.a_e_probs = self.decoder.decode(h_p, h_q)
 
 
 		def setup_loss(self):
@@ -244,23 +238,25 @@ class QASystem(object):
 				# Update learning rate
 				lr = tf.train.exponential_decay(self.initial_learning_rate, self.global_step, 100, 0.96)
 
-				#opt = get_optimizer(self.optimizer)(learning_rate=lr)
+				opt = get_optimizer(self.optimizer)(learning_rate=lr)
 
 				# Get the gradients using optimizer.compute_gradients
-				#gradients, params = zip(*opt.compute_gradients(self.loss))
+				gradients, params = zip(*opt.compute_gradients(self.loss))
+				for param in params:
+					print("Param: ", param)
 
 				# Clip the gradients to self.max_gradient_norm
-				#gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
+				gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
 	
 				# Re-zip the gradients and params
-				#grads_and_params = zip(gradients, params)
+				grads_and_params = zip(gradients, params)
 
 				# Compute the resultant global norm of the gradients and set self.grad_norm
-				#self.grad_norm = tf.global_norm(grads_and_params)
+				self.grad_norm = tf.global_norm(grads_and_params)
 
 				# Create the training operation by calling optimizer.apply_gradients
-				#self.train_op = opt.apply_gradients(grads_and_params)
-				self.train_op = get_optimizer(self.optimizer)(learning_rate=lr).minimize(self.loss, global_step=self.global_step)
+				self.train_op = opt.apply_gradients(grads_and_params, global_step=self.global_step)
+				#self.train_op = get_optimizer(self.optimizer)(learning_rate=lr).minimize(self.loss, global_step=self.global_step)
 
 
 		def setup_embeddings(self):
@@ -308,12 +304,23 @@ class QASystem(object):
 				print("Question mask batch: ", self.question_mask_placeholder)
 				print("Context mask batch: ", self.context_mask_placeholder)
 
-				#_, loss, grad_norm = session.run([self.train_op, self.loss, self.grad_norm], feed_dict=feed)
-				_, loss = session.run([self.train_op, self.loss], feed_dict=feed)
+				_, loss, grad_norm = session.run([self.train_op, self.loss, self.grad_norm], feed_dict=feed)
+				#_, loss = session.run([self.train_op, self.loss], feed_dict=feed)
 				print("a_s probs: ", self.a_s_probs.eval(feed_dict=feed, session=session))
 				print("a_e probs: ", self.a_e_probs.eval(feed_dict=feed, session=session))
-				# return loss, grad_norm	# TODO
-				return loss
+
+				# qa/answer_start/Linear/Matrix/
+				for param in tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES):
+					print(param.name)
+					print(np.unique(param.eval()))
+					print("")
+
+				#print("h_q: ", self.h_q.eval(feed_dict=feed, session=session))
+				#print("h_p: ", self.h_p.eval(feed_dict=feed, session=session))
+				#print("h_q unique: ", np.unique(self.h_q.eval(feed_dict=feed, session=session)))
+				#print("h_p unique: ", np.unique(self.h_p.eval(feed_dict=feed, session=session)))
+				return loss, grad_norm	# TODO
+				#return loss
 
 
 		def test(self, session, valid_x, valid_y):
@@ -396,6 +403,13 @@ class QASystem(object):
 				:param log: whether we print to std out stream
 				:return:
 				"""
+				random_indices = [random.random(0, len(dataset)) for _ in range(sample)]
+				batch = dataset[random_indices]
+
+				answer = p[a_s, a_e + 1]
+				true_answer = p[true_s, true_e + 1]
+				f1_score(answer, true_answer)
+				exact_match_score(answer, true_answer)
 
 				f1 = 0.
 				em = 0.
@@ -503,10 +517,10 @@ class QASystem(object):
 				#for i, batch in enumerate(self.get_tiny_batches(train_examples)):
 				for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
 						print("Global step: ", self.global_step.eval())
-						#loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob)	
-						loss = self.optimize(session, batch, self.dropout_keep_prob)	
-						#print("Loss: ", loss, " , grad norm: ", grad_norm)
-						print("Loss: ", loss)
+						loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob) #TODO	
+						#loss = self.optimize(session, batch, self.dropout_keep_prob)	
+						print("Loss: ", loss, " , grad norm: ", grad_norm)
+						#print("Loss: ", loss)
 		
 
 		def get_tiny_batches(self, data):
