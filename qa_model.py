@@ -122,9 +122,9 @@ class Decoder(object):
 				h_q = knowledge_rep["h_q"]
 				h_p = knowledge_rep["h_p"]
 				with vs.variable_scope("answer_start"):
-					a_s = rnn_cell._linear([h_q, h_p], self.output_size, True)
+					a_s = rnn_cell._linear([h_q, h_p], self.output_size, True, 1.0)
 				with vs.variable_scope("answer_end"):
-					a_e = rnn_cell._linear([h_q, h_p], self.output_size, True)
+					a_e = rnn_cell._linear([h_q, h_p], self.output_size, True, 1.0)
 
 				return (a_s, a_e)
 
@@ -186,7 +186,10 @@ class QASystem(object):
 				self.question_mask_placeholder = tf.placeholder(tf.bool, (None, self.max_question_len))
 				self.context_mask_placeholder = tf.placeholder(tf.bool, (None, self.max_context_len))
 
-				self.labels_placeholder = tf.placeholder(tf.int32, (None, self.n_classes))
+				#self.labels_placeholder = tf.placeholder(tf.int32, (None, self.n_classes))
+				self.start_answer_placeholder = tf.placeholder(tf.int32, (None, self.max_context_len))
+				self.end_answer_placeholder = tf.placeholder(tf.int32, (None, self.max_context_len))
+
 				self.dropout_placeholder = tf.placeholder(tf.float32, ())
 
 
@@ -225,10 +228,10 @@ class QASystem(object):
 				"""
 				# The label is a one-hot representation
 				with vs.variable_scope("loss"):
-					start_answer = self.labels_placeholder[:,0]
-					end_answer = self.labels_placeholder[:,1]
-					l1 = sparse_softmax_cross_entropy_with_logits(self.a_s_probs, start_answer)
-					l2 = sparse_softmax_cross_entropy_with_logits(self.a_e_probs, end_answer)
+					print("a_s_probs: ", self.a_s_probs)
+					print("start answer: ", self.start_answer_placeholder)
+					l1 = tf.nn.softmax_cross_entropy_with_logits(logits=self.a_s_probs, labels=self.start_answer_placeholder)
+					l2 = tf.nn.softmax_cross_entropy_with_logits(logits=self.a_e_probs, labels=self.end_answer_placeholder)
 					self.loss = l1 + l2 
 
 		def setup_training_op(self):
@@ -287,27 +290,29 @@ class QASystem(object):
 				This method is equivalent to a step() function
 				:return:
 				"""
-				question_batch, context_batch, question_mask_batch, context_mask_batch, answer_batch = zip(*train_batch)
+				question_batch, context_batch, question_mask_batch, context_mask_batch, start_answer_batch, end_answer_batch = zip(*train_batch)
 
 				feed = {}
 				feed[self.question_input_placeholder] = question_batch
 				feed[self.context_input_placeholder] = context_batch
 				feed[self.question_mask_placeholder] = question_mask_batch
 				feed[self.context_mask_placeholder] = context_mask_batch
-				feed[self.labels_placeholder] = answer_batch
+				feed[self.start_answer_placeholder] = start_answer_batch
+				feed[self.end_answer_placeholder] = end_answer_batch
 				feed[self.dropout_placeholder] = dropout_keep_prob
 
 				print("Question batch: ", self.question_input_placeholder)
 				print("Context batch: ", self.context_input_placeholder)
-				print("Answer batch: ", self.labels_placeholder)
+				print("Start answer batch: ", self.start_answer_placeholder)
+				print("End answer batch: ", self.end_answer_placeholder)
 				print("Question mask batch: ", self.question_mask_placeholder)
 				print("Context mask batch: ", self.context_mask_placeholder)
 
 				#_, loss, grad_norm = session.run([self.train_op, self.loss, self.grad_norm], feed_dict=feed)
 				_, loss = session.run([self.train_op, self.loss], feed_dict=feed)
-				print("a_s probs: ", self.a_s_probs)
-				print("a_e probs: ", self.a_e_probs)
-				# return loss, grad_norm  # TODO
+				print("a_s probs: ", self.a_s_probs.eval(feed_dict=feed, session=session))
+				print("a_e probs: ", self.a_e_probs.eval(feed_dict=feed, session=session))
+				# return loss, grad_norm	# TODO
 				return loss
 
 
@@ -430,13 +435,13 @@ class QASystem(object):
 				# so that you can use your trained model to make predictions, or
 				# even continue training
 
-				dataset = self.pad_dataset(dataset)
+				dataset = self.preprocess_dataset(dataset)
 
 				init = tf.global_variables_initializer() 
 				session.run(init)
 				self.saver.save(session, self.train_dir + "/baseline_model_0") 
 
-				for epoch in range(self.epochs):  
+				for epoch in range(self.epochs):	
 					logging.info("Epoch %d out of %d", epoch + 1, self.epochs)
 					self.run_epoch(session, dataset['train'])
 
@@ -451,7 +456,8 @@ class QASystem(object):
 
 		
 		# Some more preprocessing to make all the questions and context sequences the same length.
-		def pad_dataset(self, dataset):
+		# Also adds two 1-hot vectors for start_answer and end_answer
+		def preprocess_dataset(self, dataset):
 			for data_subset_name in ['train', 'val']:
 				# Iterate over each triplet in the dataset (train or val)
 				for i in range(len(dataset[data_subset_name])):  
@@ -463,8 +469,13 @@ class QASystem(object):
 
 					padded_question, question_mask = self.pad_sequence(question, self.max_question_len)
 					padded_context, context_mask = self.pad_sequence(context, self.max_context_len)
+					start_answer = [0] * self.max_context_len
+					start_answer[answer[0]] = 1
+					end_answer = [0] * self.max_context_len
+					end_answer[answer[1]] = 1
 
-					dataset[data_subset_name][i] = (padded_question, padded_context, question_mask, context_mask, answer)
+					dataset[data_subset_name][i] = (padded_question, padded_context, 
+								question_mask, context_mask, start_answer, end_answer)
  
 			return dataset
 
@@ -492,9 +503,8 @@ class QASystem(object):
 				#for i, batch in enumerate(self.get_tiny_batches(train_examples)):
 				for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
 						print("Global step: ", self.global_step.eval())
-						print("Answer spans: ", [fiveTuple[4] for fiveTuple in batch])
 						#loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob)	
-						loss = self.optimize(session, batch, self.dropout_keep_prob)  
+						loss = self.optimize(session, batch, self.dropout_keep_prob)	
 						#print("Loss: ", loss, " , grad norm: ", grad_norm)
 						print("Loss: ", loss)
 		
