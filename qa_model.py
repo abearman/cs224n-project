@@ -222,8 +222,6 @@ class QASystem(object):
 				"""
 				# The label is a one-hot representation
 				with vs.variable_scope("loss"):
-					print("a_s_probs: ", self.a_s_probs)
-					print("start answer: ", self.start_answer_placeholder)
 					l1 = tf.nn.softmax_cross_entropy_with_logits(logits=self.a_s_probs, labels=self.start_answer_placeholder)
 					l2 = tf.nn.softmax_cross_entropy_with_logits(logits=self.a_e_probs, labels=self.end_answer_placeholder)
 					self.loss = l1 + l2 
@@ -348,18 +346,28 @@ class QASystem(object):
 				so that other methods like self.answer() will be able to work properly
 				:return:
 				"""
+				question_batch, context_batch, question_mask_batch, context_mask_batch, start_answer_batch, end_answer_batch = zip(*test_x)
+
 				input_feed = {}
+				input_feed[self.question_input_placeholder] = question_batch
+				input_feed[self.context_input_placeholder] = context_batch
+				input_feed[self.question_mask_placeholder] = question_mask_batch
+				input_feed[self.context_mask_placeholder] = context_mask_batch
+				input_feed[self.start_answer_placeholder] = start_answer_batch
+				input_feed[self.end_answer_placeholder] = end_answer_batch
+				# No dropout on test 
+				input_feed[self.dropout_placeholder] = 1.0
+				#input_feed[self.dropout_placeholder] = self.dropout_keep_prob
 
-				# fill in this feed_dictionary like:
-				# input_feed['test_x'] = test_x
+				_, loss, grad_norm = session.run([self.train_op, self.loss, self.grad_norm], feed_dict=input_feed)
+				return self.a_s_probs, self.a_e_probs  # 2 arrays with batch size rows and output size columns 
 
-				output_feed = []
-
-				outputs = session.run(output_feed, input_feed)
-
-				return outputs
 
 		def answer(self, session, test_x):
+				"""
+				Returns the most likely start (a_s) and end (a_e) position 
+				in the context paragraph for each example in a test batch.
+				"""
 
 				yp, yp2 = self.decode(session, test_x)
 
@@ -367,6 +375,7 @@ class QASystem(object):
 				a_e = np.argmax(yp2, axis=1)
 
 				return (a_s, a_e)
+
 
 		def validate(self, sess, valid_dataset):
 				"""
@@ -405,14 +414,17 @@ class QASystem(object):
 				"""
 				random_indices = [random.random(0, len(dataset)) for _ in range(sample)]
 				batch = dataset[random_indices]
+				question_batch, context_batch, question_mask_batch, context_mask_batch, start_answer_batch, end_answer_batch = zip(*batch)
 
-				answer = p[a_s, a_e + 1]
-				true_answer = p[true_s, true_e + 1]
-				f1_score(answer, true_answer)
-				exact_match_score(answer, true_answer)
+				a_s, a_e = self.answer(session, batch)	# These are both arrays of length sample size
+				answer = [a_s, a_e]	
+				true_answer = [start_answer_batch, end_answer_batch]	
 
-				f1 = 0.
-				em = 0.
+				f1 = f1_score(answer, true_answer)
+				em = exact_match_score(answer, true_answer)
+
+				#f1 = 0.
+				#em = 0.
 
 				if log:
 						logging.info("F1: {}, EM: {}, for {} samples".format(f1, em, sample))
@@ -521,7 +533,9 @@ class QASystem(object):
 						#loss = self.optimize(session, batch, self.dropout_keep_prob)	
 						print("Loss: ", loss, " , grad norm: ", grad_norm)
 						#print("Loss: ", loss)
-		
+						if (i % 100) == 0:
+							evaluate_answer(self, session, train_examples, sample=100, log=True)
+
 
 		def get_tiny_batches(self, data):
 				return [data[0:10], data[10:20]]
