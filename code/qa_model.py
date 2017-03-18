@@ -198,7 +198,7 @@ class Decoder(object):
 
 				def decode_v2(self, final_D, W, W_prime, context_mask): 
 					with vs.variable_scope("answer_start"):
-						a_s = tf.nn.l2_normalize(tf.squeeze(matrix_multiply_with_batch(matrix=W, batch=tf.transpose(final_D, [0, 2, 1]), matrixByBatch=False)), 1)		# a_s = final_D * W
+						a_s = tf.squeeze(matrix_multiply_with_batch(matrix=W, batch=tf.transpose(final_D, [0, 2, 1]), matrixByBatch=False))		# a_s = final_D * W
 						print("a_s: ", a_s)
 
 					with vs.variable_scope("answer_end"):
@@ -206,11 +206,11 @@ class Decoder(object):
 						context_length = tf.reduce_sum(tf.cast(context_mask, tf.int32), reduction_indices=1)
 						print("Context length: ", context_length)
 						final_D_prime, _ = dynamic_rnn(lstm_cell, final_D,
-															 						sequence_length=context_length, time_major=False, dtype=tf.float32)
+																					sequence_length=context_length, time_major=False, dtype=tf.float32)
 						print("final D prime: ", final_D_prime)
 						a_e = matrix_multiply_with_batch(matrix=W_prime, batch=tf.transpose(final_D_prime, [0, 2, 1]), matrixByBatch=False)
 						print("a_e: ", a_e)
-						a_e = tf.nn.l2_normalize(tf.squeeze(matrix_multiply_with_batch(matrix=W_prime, batch=tf.transpose(final_D_prime, [0, 2, 1]), matrixByBatch=False)), 1)
+						a_e = tf.squeeze(matrix_multiply_with_batch(matrix=W_prime, batch=tf.transpose(final_D_prime, [0, 2, 1]), matrixByBatch=False))
 						print("a_e: ", a_e)
 
 					return (a_s, a_e)
@@ -433,8 +433,8 @@ class QASystem(object):
 								#print("H_q: ", np.unique(self.encoder.H_q.eval(feed_dict=feed, session=session)))
 								#print("H_p: ", self.encoder.H_p.eval(feed_dict=feed, session=session))
 
-								print("a_s probs: ", self.a_s_probs.eval(feed_dict=feed, session=session)) 
-								print("a_e probs: ", self.a_e_probs.eval(feed_dict=feed, session=session)) 
+								#print("a_s probs: ", self.a_s_probs.eval(feed_dict=feed, session=session)) 
+								#print("a_e probs: ", self.a_e_probs.eval(feed_dict=feed, session=session)) 
 
 								#print("H_q: ", self.encoder.H_q.eval(feed_dict=feed, session=session))
 								#print("H_p: ", self.encoder.H_p.eval(feed_dict=feed, session=session))
@@ -498,7 +498,7 @@ class QASystem(object):
 
 								return a_s, a_e 
 
-				def validate(self, sess, valid_dataset):
+				def validate(self, session, dataset, model_path, model_name):
 								"""
 								Iterate through the validation dataset and determine what
 								the validation cost is.
@@ -510,13 +510,22 @@ class QASystem(object):
 
 								:return:
 								"""
-								valid_cost = 0
+								new_saver = tf.train.import_meta_graph(model_path + model_name)
+								new_saver.restore(session, tf.train.latest_checkpoint(model_path))
 
-								for valid_x, valid_y in valid_dataset:
-										valid_cost = self.test(sess, valid_x, valid_y)
+								f1s = []
+								ems = []
+								step = 1000
+								for start_idx in range(0, len(dataset['val']), step):
+									end_idx = min(start_idx + step, len(dataset['val']))
+									f1s_one_batch, ems_one_batch = self.evaluate_answer(session, dataset['val'][start_idx:end_idx], sample=None, log=True)
+									f1s += f1s_one_batch
+									ems += ems_one_batch
+								f1_total = sum(f1s) / float(len(f1s))
+								em_total = sum(ems) / float(len(ems))
+								print("Total f1: ", f1_total)
+								print("Total em: ", em_total)
 
-
-								return valid_cost
 
 				def evaluate_answer(self, session, dataset, sample=100, log=False):
 								"""
@@ -533,8 +542,12 @@ class QASystem(object):
 								:param log: whether we print to std out stream
 								:return:
 								"""
-								random_indices = [random.randint(0, len(dataset)) for _ in range(sample)]
-								batch = [dataset[idx] for idx in random_indices]
+								batch = dataset
+								if sample is None:
+									sample = len(dataset)
+								else:	# If we only select a subset of the data
+									random_indices = [random.randint(0, len(dataset)) for _ in range(sample)]
+									batch = [dataset[idx] for idx in random_indices]
 								question_batch, context_batch, question_mask_batch, context_mask_batch, start_answer_batch, end_answer_batch = zip(*batch)
 
 								a_s, a_e = self.answer(session, batch)		# These are both arrays of length sample size
@@ -563,7 +576,7 @@ class QASystem(object):
 								if log:
 												logging.info("F1: {}, EM: {}, for {} samples".format(f1, em, sample))
 
-								return f1, em
+								return f1s, ems
 
 				def train(self, session, dataset, train_dir):
 								"""
@@ -599,7 +612,9 @@ class QASystem(object):
 
 								init = tf.global_variables_initializer() 
 								session.run(init)
-								self.saver.save(session, self.train_dir + "/baselinev2_model_0") 
+
+								self.validate(session, dataset, 'saved_models/', 'baselinev2_model_epoch_9_iter_8000.meta')
+								exit()
 
 								for epoch in range(self.epochs):		
 										logging.info("Epoch %d out of %d", epoch + 1, self.epochs)
@@ -613,6 +628,9 @@ class QASystem(object):
 										num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
 										toc = time.time()
 										logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
+								
+								# Run on the validation set when done training
+								evaluate_answer(session, dataset['val'], sample=none, log=True)
 
 				
 				# Some more preprocessing to make all the questions and context sequences the same length.
@@ -677,7 +695,7 @@ class QASystem(object):
 												if (i % 100) == 0:
 														self.evaluate_answer(session, train_examples, sample=100, log=True)
 				
-												if (i % 1000) == 0:
+												if (i % 100) == 0:
 														# Save model
 														self.saver.save(session, self.train_dir + "/baselinev2_model_epoch_" + str(epoch_no) + "_iter_" + str(i))
 
