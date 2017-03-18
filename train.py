@@ -14,13 +14,13 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-tf.app.flags.DEFINE_float("learning_rate", 0.01, "Learning rate.")
+tf.app.flags.DEFINE_float("learning_rate", 0.1, "Learning rate.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
 tf.app.flags.DEFINE_integer("batch_size", 10, "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("epochs", 10, "Number of epochs to train.")
 tf.app.flags.DEFINE_integer("state_size", 200, "Size of each model layer.")
-tf.app.flags.DEFINE_integer("output_size", 766, "The output size of your model.")
+tf.app.flags.DEFINE_integer("output_size", 300, "The output size of your model.")
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained vocabulary.")
 tf.app.flags.DEFINE_string("data_dir", "data/squad", "SQuAD directory (default ./data/squad)")
 tf.app.flags.DEFINE_string("train_dir", "train", "Training directory to save the model parameters (default: ./train).")
@@ -38,6 +38,7 @@ FLAGS = tf.app.flags.FLAGS
 def initialize_model(session, model, train_dir):
 		model.saver = tf.train.Saver()
 		ckpt = tf.train.get_checkpoint_state(train_dir)
+		ckpt = None
 		v2_path = ckpt.model_checkpoint_path + ".index" if ckpt else ""
 		if ckpt and (tf.gfile.Exists(ckpt.model_checkpoint_path) or tf.gfile.Exists(v2_path)):
 				logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
@@ -107,8 +108,8 @@ def main(_):
 		vocab_path = FLAGS.vocab_path or pjoin(FLAGS.data_dir, "vocab.dat")
 		vocab, rev_vocab = initialize_vocab(vocab_path)
 
-		encoder = Encoder(state_size=FLAGS.state_size, embedding_size=FLAGS.embedding_size)
-		decoder = Decoder(output_size=FLAGS.output_size)
+		encoder = Encoder(state_size=FLAGS.state_size, embedding_size=FLAGS.embedding_size, output_size=FLAGS.output_size)
+		decoder = Decoder(state_size=FLAGS.state_size, output_size=FLAGS.output_size)
 
 		qa_args = {"embed_path": embed_path, "embedding_size": FLAGS.embedding_size,
 							 "output_size": FLAGS.output_size, "optimizer": FLAGS.optimizer,

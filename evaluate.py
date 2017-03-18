@@ -26,9 +26,9 @@ def normalize_answer(s):
     return white_space_fix(remove_articles(remove_punc(lower(s))))
 
 
-def f1_score(prediction, ground_truth):
-    prediction_tokens = normalize_answer(prediction).split()
-    ground_truth_tokens = normalize_answer(ground_truth).split()
+def f1_score(prediction_tokens, ground_truth_tokens):
+    #prediction_tokens = normalize_answer(prediction).split()
+    #ground_truth_tokens = normalize_answer(ground_truth).split()
     common = Counter(prediction_tokens) & Counter(ground_truth_tokens)
     num_same = sum(common.values())
     if num_same == 0:
@@ -40,7 +40,8 @@ def f1_score(prediction, ground_truth):
 
 
 def exact_match_score(prediction, ground_truth):
-    return (normalize_answer(prediction) == normalize_answer(ground_truth))
+    #return (normalize_answer(prediction) == normalize_answer(ground_truth))
+    return prediction == ground_truth
 
 
 def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
