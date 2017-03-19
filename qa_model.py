@@ -16,6 +16,11 @@ from tensorflow.python.ops.nn import bidirectional_dynamic_rnn
 from tensorflow.python.ops.nn import dynamic_rnn
 from tensorflow.python.ops.nn import sparse_softmax_cross_entropy_with_logits	
 from tensorflow.python.ops.gen_math_ops import _batch_mat_mul as batch_matmul
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import time
+import datetime
 
 from evaluate import exact_match_score, f1_score
 
@@ -30,6 +35,12 @@ def get_optimizer(opt):
 				else:
 								assert (False)
 				return optfn
+
+def plot_losses(losses):
+	plt.plot(losses)
+	ts = time.time()
+	st = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+	plt.savefig('loss/Losses_' + st)
 
 
 class GRUAttnCell(rnn_cell.GRUCell):
@@ -515,13 +526,22 @@ class QASystem(object):
 
 								:return:
 								"""
-								valid_cost = 0
+								new_saver = tf.train.import_meta_graph(model_path + model_name)
+                new_saver.restore(session, tf.train.latest_checkpoint(model_path))
 
-								for valid_x, valid_y in valid_dataset:
-										valid_cost = self.test(sess, valid_x, valid_y)
+                f1s = []
+                ems = []
+                step = 1000
+                for start_idx in range(0, len(dataset['val']), step):
+                  end_idx = min(start_idx + step, len(dataset['val']))
+                  f1s_one_batch, ems_one_batch = self.evaluate_answer(session, dataset['val'][start_idx:end_idx], sample=None, log=True)
+                  f1s += f1s_one_batch
+                  ems += ems_one_batch
+                f1_total = sum(f1s) / float(len(f1s))
+                em_total = sum(ems) / float(len(ems))
+                print("Total f1: ", f1_total)
+                print("Total em: ", em_total)
 
-
-								return valid_cost
 
 				def evaluate_answer(self, session, dataset, sample=100, log=False, shuffle=True):
 								"""
@@ -608,9 +628,10 @@ class QASystem(object):
 								session.run(init)
 								self.saver.save(session, self.train_dir + "/baselinev2_model_0") 
 
+								training_losses = []
 								for epoch in range(100): #range(self.epochs):		
 										logging.info("Epoch %d out of %d", epoch + 1, self.epochs)
-										self.run_epoch(session, dataset['train'], epoch)
+										self.run_epoch(session, dataset['train'], epoch, training_losses)
 
 										# Save model
 										self.saver.save(session, self.train_dir + "/baselinev2_model_epoch_" + str(epoch))
@@ -620,6 +641,12 @@ class QASystem(object):
 										num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
 										toc = time.time()
 										logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
+										plot_losses(training_losses)
+
+								plot_losses(training_losses)
+
+								# Run on the validation set when done training
+								self.evaluate_answer(session, dataset['val'], sample=None, log=True)
 
 				
 				# Some more preprocessing to make all the questions and context sequences the same length.
@@ -672,13 +699,15 @@ class QASystem(object):
 				# A single training example is a triplet: (question, context, answer). Each entry 
 				# of the triplet is a list of word IDs.
 				# Each batch only has training examples (no val examples).
-				def run_epoch(self, session, train_examples, epoch_no):
+				def run_epoch(self, session, train_examples, epoch_no, training_losses):
 								for i, batch in enumerate(self.get_tiny_batches(train_examples, sample=20)):
 								#for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
 												print("Global step: ", self.global_step.eval())
 												loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob) #TODO	
-												print("Loss: ", loss, " , grad norm: ", grad_norm)
-				
+												loss_for_batch = sum(loss) / float(len(loss))
+												print("Loss: ", loss_for_batch, " , grad norm: ", grad_norm)
+												training_losses.append(loss_for_batch)
+
 												if (i % 100) == 0:
 														self.evaluate_answer(session, train_examples, sample=20, log=True, shuffle=False)
 				
