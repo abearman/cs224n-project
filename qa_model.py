@@ -99,7 +99,7 @@ class Encoder(object):
 		"""
 		with vs.variable_scope("encoder"):
 			# Question -> LSTM -> Q
-			lstm_cell = tf.nn.rnn_cell.LSTMCell(self.embedding_size)
+			lstm_cell = tf.nn.rnn_cell.LSTMCell(self.state_size)
 			question_length = tf.reduce_sum(tf.cast(question_mask, tf.int32), reduction_indices=1)
 			print("Question length: ", question_length)
 			Q_prime, _ = dynamic_rnn(lstm_cell, tf.transpose(question_embeddings, [0, 2, 1]), 
@@ -108,9 +108,9 @@ class Encoder(object):
 			print("Q_prime: ", Q_prime)
 
 			# Non-linear projection layer on top of the question encoding
-			W_Q = tf.get_variable("W_Q", (self.embedding_size, self.embedding_size))
-			b_Q = tf.get_variable("b_Q", (self.embedding_size, 1)) 
-			Q = tf.tanh(matrix_multiply_with_batch(matrix=W_Q, batch=question_embeddings, matrixByBatch=True) + b_Q) 
+			W_Q = tf.get_variable("W_Q", (self.state_size, self.state_size))
+			b_Q = tf.get_variable("b_Q", (self.state_size, 1)) 
+			Q = tf.tanh(matrix_multiply_with_batch(matrix=W_Q, batch=Q_prime, matrixByBatch=True) + b_Q) 
 			print("Q: ", Q)
 
 			# Paragraph -> LSTM -> D
@@ -213,13 +213,14 @@ class Decoder(object):
 						print("a_s: ", a_s)
 
 					with vs.variable_scope("answer_end"):
-						lstm_cell = tf.nn.rnn_cell.LSTMCell(self.output_size)
-						context_length = tf.reduce_sum(tf.cast(context_mask, tf.int32), reduction_indices=1)
-						print("Context length: ", context_length)
-						final_D_prime, _ = dynamic_rnn(lstm_cell, final_D,
-																					sequence_length=context_length, time_major=False, dtype=tf.float32)
-						print("final D prime: ", final_D_prime)
-						a_e = tf.squeeze(matrix_multiply_with_batch(matrix=W_prime, batch=tf.transpose(final_D_prime, [0, 2, 1]), matrixByBatch=False))
+						#lstm_cell = tf.nn.rnn_cell.LSTMCell(self.state_size)
+						#context_length = tf.reduce_sum(tf.cast(context_mask, tf.int32), reduction_indices=1)
+						#print("Context length: ", context_length)
+						#final_D_prime, _ = dynamic_rnn(lstm_cell, tf.transpose(final_D, [0, 2, 1]),
+						#															sequence_length=context_length, time_major=False, dtype=tf.float32)
+						#final_D_prime = tf.transpose(final_D_prime, [0, 2, 1])
+						#print("final D prime: ", final_D_prime)
+						a_e = tf.squeeze(matrix_multiply_with_batch(matrix=W_prime, batch=tf.transpose(final_D, [0, 2, 1]), matrixByBatch=False))
 						print("a_e: ", a_e)
 
 					return (a_s, a_e)
@@ -330,8 +331,8 @@ class QASystem(object):
 					:return:
 					"""	
 					# Set up prediction op		
-					W = tf.get_variable("W", (3*self.embedding_size, 1)) 
-					W_prime = tf.get_variable("W_prime", (3*self.embedding_size, 1)) 
+					W = tf.get_variable("W", (3*self.state_size, 1)) 
+					W_prime = tf.get_variable("W_prime", (3*self.state_size, 1)) 
 					final_D = self.encoder.encode_v2(self.question_embeddings, self.context_embeddings, 
 																					self.question_mask_placeholder, self.context_mask_placeholder, 
 																					None, self.dropout_keep_prob, self.batch_size_placeholder)
@@ -527,20 +528,20 @@ class QASystem(object):
 								:return:
 								"""
 								new_saver = tf.train.import_meta_graph(model_path + model_name)
-                new_saver.restore(session, tf.train.latest_checkpoint(model_path))
+								new_saver.restore(session, tf.train.latest_checkpoint(model_path))
 
-                f1s = []
-                ems = []
-                step = 1000
-                for start_idx in range(0, len(dataset['val']), step):
-                  end_idx = min(start_idx + step, len(dataset['val']))
-                  f1s_one_batch, ems_one_batch = self.evaluate_answer(session, dataset['val'][start_idx:end_idx], sample=None, log=True)
-                  f1s += f1s_one_batch
-                  ems += ems_one_batch
-                f1_total = sum(f1s) / float(len(f1s))
-                em_total = sum(ems) / float(len(ems))
-                print("Total f1: ", f1_total)
-                print("Total em: ", em_total)
+								f1s = []
+								ems = []
+								step = 1000
+								for start_idx in range(0, len(dataset['val']), step):
+									end_idx = min(start_idx + step, len(dataset['val']))
+									f1s_one_batch, ems_one_batch = self.evaluate_answer(session, dataset['val'][start_idx:end_idx], sample=None, log=True)
+									f1s += f1s_one_batch
+									ems += ems_one_batch
+								f1_total = sum(f1s) / float(len(f1s))
+								em_total = sum(ems) / float(len(ems))
+								print("Total f1: ", f1_total)
+								print("Total em: ", em_total)
 
 
 				def evaluate_answer(self, session, dataset, sample=100, log=False, shuffle=True):
@@ -700,7 +701,7 @@ class QASystem(object):
 				# of the triplet is a list of word IDs.
 				# Each batch only has training examples (no val examples).
 				def run_epoch(self, session, train_examples, epoch_no, training_losses):
-								for i, batch in enumerate(self.get_tiny_batches(train_examples, sample=20)):
+								for i, batch in enumerate(self.get_tiny_batches(train_examples, sample=2000)):
 								#for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
 												print("Global step: ", self.global_step.eval())
 												loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob) #TODO	
@@ -709,7 +710,7 @@ class QASystem(object):
 												training_losses.append(loss_for_batch)
 
 												if (i % 100) == 0:
-														self.evaluate_answer(session, train_examples, sample=20, log=True, shuffle=False)
+														self.evaluate_answer(session, train_examples, sample=100, log=True, shuffle=True)
 				
 												if (i % 1000) == 0:
 														# Save model
