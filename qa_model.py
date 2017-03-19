@@ -100,7 +100,7 @@ class Encoder(object):
 		"""
 		with vs.variable_scope("encoder"):
 			# Question -> LSTM -> Q
-			lstm_cell = tf.nn.rnn_cell.LSTMCell(self.state_size)
+			lstm_cell = tf.nn.rnn_cell.LSTMCell(self.embedding_size)
 			question_length = tf.reduce_sum(tf.cast(question_mask, tf.int32), reduction_indices=1)
 			print("Question length: ", question_length)
 			Q_prime, _ = dynamic_rnn(lstm_cell, tf.transpose(question_embeddings, [0, 2, 1]), 
@@ -109,9 +109,9 @@ class Encoder(object):
 			print("Q_prime: ", Q_prime)
 
 			# Non-linear projection layer on top of the question encoding
-			W_Q = tf.get_variable("W_Q", (self.state_size, self.state_size))
-			b_Q = tf.get_variable("b_Q", (self.state_size, 1)) 
-			Q = tf.tanh(matrix_multiply_with_batch(matrix=W_Q, batch=Q_prime, matrixByBatch=True) + b_Q) 
+			W_Q = tf.get_variable("W_Q", (self.embedding_size, self.embedding_size))
+			b_Q = tf.get_variable("b_Q", (self.embedding_size, 1)) 
+			Q = tf.tanh(matrix_multiply_with_batch(matrix=W_Q, batch=question_embeddings, matrixByBatch=True) + b_Q) 
 			print("Q: ", Q)
 
 			# Paragraph -> LSTM -> D
@@ -214,12 +214,11 @@ class Decoder(object):
 						print("a_s: ", a_s)
 
 					with vs.variable_scope("answer_end"):
-						lstm_cell = tf.nn.rnn_cell.LSTMCell(self.state_size)
+						lstm_cell = tf.nn.rnn_cell.LSTMCell(self.output_size)
 						context_length = tf.reduce_sum(tf.cast(context_mask, tf.int32), reduction_indices=1)
 						print("Context length: ", context_length)
-						final_D_prime, _ = dynamic_rnn(lstm_cell, tf.transpose(final_D, [0, 2, 1]),
+						final_D_prime, _ = dynamic_rnn(lstm_cell, final_D,
 																					sequence_length=context_length, time_major=False, dtype=tf.float32)
-						final_D_prime = tf.transpose(final_D_prime, [0, 2, 1])
 						print("final D prime: ", final_D_prime)
 						a_e = tf.squeeze(matrix_multiply_with_batch(matrix=W_prime, batch=tf.transpose(final_D_prime, [0, 2, 1]), matrixByBatch=False))
 						print("a_e: ", a_e)
@@ -332,8 +331,8 @@ class QASystem(object):
 					:return:
 					"""	
 					# Set up prediction op		
-					W = tf.get_variable("W", (3*self.state_size, 1)) 
-					W_prime = tf.get_variable("W_prime", (self.state_size, 1)) 
+					W = tf.get_variable("W", (3*self.embedding_size, 1)) 
+					W_prime = tf.get_variable("W_prime", (3*self.embedding_size, 1)) 
 					final_D = self.encoder.encode_v2(self.question_embeddings, self.context_embeddings, 
 																					self.question_mask_placeholder, self.context_mask_placeholder, 
 																					None, self.dropout_keep_prob)
@@ -633,7 +632,7 @@ class QASystem(object):
 								#exit()
 
 								training_losses = []
-								for epoch in range(200): #range(self.epochs):		
+								for epoch in range(100): #range(self.epochs):		
 										logging.info("Epoch %d out of %d", epoch + 1, self.epochs)
 										training_losses = self.run_epoch(session, dataset['train'], epoch, training_losses)
 
@@ -710,14 +709,14 @@ class QASystem(object):
 								#	tiny_batch = self.get_tiny_batches(train_examples, sample=1000)
 								#	print("tiny batch len: ", len(tiny_batch))
 								#	batches = []
-								#	for i in range(20): # Equivalent of 20 epochs on the small dataset
+								#	for i in range(10): # Equivalent of 10 epochs on the small dataset
 								#		batches += tiny_batch
 								#	print("len batches: ", len(batches))
 
-								for i, batch in enumerate(self.get_tiny_batches(train_examples, sample=200)):
+								for i, batch in enumerate(self.get_tiny_batches(train_examples, sample=20)):
 								#for i, batch in enumerate(batches):
 												print("Global step: ", self.global_step.eval())
-												loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob) #TODO	
+												loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob) 
 												loss_for_batch = sum(loss) / float(len(loss))
 												print("Loss: ", loss_for_batch, " , grad norm: ", grad_norm)
 												training_losses.append(loss_for_batch)			
@@ -725,7 +724,7 @@ class QASystem(object):
 		
 												if (i % 100) == 0:
 														print("LR: ", self.lr.eval())
-														self.evaluate_answer(session, train_examples, sample=100, log=True, shuffle=True)
+														self.evaluate_answer(session, train_examples, sample=20, log=True, shuffle=False) # TODO
 														plot_losses(training_losses)
 
 												if (i % 1000) == 0:
