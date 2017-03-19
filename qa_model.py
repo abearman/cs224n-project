@@ -16,6 +16,11 @@ from tensorflow.python.ops.nn import bidirectional_dynamic_rnn
 from tensorflow.python.ops.nn import dynamic_rnn
 from tensorflow.python.ops.nn import sparse_softmax_cross_entropy_with_logits	
 from tensorflow.python.ops.gen_math_ops import _batch_mat_mul as batch_matmul
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import time
+import datetime
 
 from evaluate import exact_match_score, f1_score
 
@@ -30,6 +35,13 @@ def get_optimizer(opt):
 				else:
 								assert (False)
 				return optfn
+
+
+def plot_losses(losses):
+	plt.plot(losses)
+	ts = time.time()
+	st = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+	plt.savefig('loss/Losses_' + st) 
 
 
 class GRUAttnCell(rnn_cell.GRUCell):
@@ -83,12 +95,12 @@ class Encoder(object):
 
 
 	def encode_v2(self, question_embeddings, document_embeddings, question_mask, context_mask,
-																		encoderb_state_input, dropout_keep_prob, batch_size):
+																		encoderb_state_input, dropout_keep_prob):
 		""" encode_v2() 
 		"""
 		with vs.variable_scope("encoder"):
 			# Question -> LSTM -> Q
-			lstm_cell = tf.nn.rnn_cell.LSTMCell(self.embedding_size)
+			lstm_cell = tf.nn.rnn_cell.LSTMCell(self.state_size)
 			question_length = tf.reduce_sum(tf.cast(question_mask, tf.int32), reduction_indices=1)
 			print("Question length: ", question_length)
 			Q_prime, _ = dynamic_rnn(lstm_cell, tf.transpose(question_embeddings, [0, 2, 1]), 
@@ -97,9 +109,9 @@ class Encoder(object):
 			print("Q_prime: ", Q_prime)
 
 			# Non-linear projection layer on top of the question encoding
-			W_Q = tf.get_variable("W_Q", (self.embedding_size, self.embedding_size))
-			b_Q = tf.get_variable("b_Q", (self.embedding_size, 1)) 
-			Q = tf.tanh(matrix_multiply_with_batch(matrix=W_Q, batch=question_embeddings, matrixByBatch=True) + b_Q) 
+			W_Q = tf.get_variable("W_Q", (self.state_size, self.state_size))
+			b_Q = tf.get_variable("b_Q", (self.state_size, 1)) 
+			Q = tf.tanh(matrix_multiply_with_batch(matrix=W_Q, batch=Q_prime, matrixByBatch=True) + b_Q) 
 			print("Q: ", Q)
 
 			# Paragraph -> LSTM -> D
@@ -196,19 +208,20 @@ class Decoder(object):
 								self.state_size = state_size
 								self.output_size = output_size
 
-				def decode_v2(self, final_D, W, W_prime, context_mask, embed_size): 
+				def decode_v2(self, final_D, W, W_prime, context_mask): 
 					with vs.variable_scope("answer_start"):
-						a_s = tf.squeeze(matrix_multiply_with_batch(matrix=W, batch=final_D, matrixByBatch=False))		# a_s = final_D * W
+						a_s = tf.squeeze(matrix_multiply_with_batch(matrix=W, batch=tf.transpose(final_D, [0, 2, 1]), matrixByBatch=False))		# a_s = final_D * W
 						print("a_s: ", a_s)
 
 					with vs.variable_scope("answer_end"):
-						lstm_cell = tf.nn.rnn_cell.LSTMCell(3*embed_size)
+						lstm_cell = tf.nn.rnn_cell.LSTMCell(self.state_size)
 						context_length = tf.reduce_sum(tf.cast(context_mask, tf.int32), reduction_indices=1)
 						print("Context length: ", context_length)
-						final_D_prime, _ = dynamic_rnn(lstm_cell, final_D,
-															 						sequence_length=context_length, time_major=False, dtype=tf.float32)
+						final_D_prime, _ = dynamic_rnn(lstm_cell, tf.transpose(final_D, [0, 2, 1]),
+																					sequence_length=context_length, time_major=False, dtype=tf.float32)
+						final_D_prime = tf.transpose(final_D_prime, [0, 2, 1])
 						print("final D prime: ", final_D_prime)
-						a_e = tf.squeeze(matrix_multiply_with_batch(matrix=W_prime, batch=final_D_prime, matrixByBatch=False))
+						a_e = tf.squeeze(matrix_multiply_with_batch(matrix=W_prime, batch=tf.transpose(final_D_prime, [0, 2, 1]), matrixByBatch=False))
 						print("a_e: ", a_e)
 
 					return (a_s, a_e)
@@ -244,12 +257,13 @@ class QASystem(object):
 								"""
 								# Dataset constants
 								self.max_question_len = 60				# Longest question sequence to parse (in train or val set)
-								self.max_context_len = 300				# Longest context sequence to parse (in train or val set): (766, truncated at 750)
+								self.max_context_len = 301				# Longest context sequence to parse (in train or val set): (766, truncated at 750)
 								self.max_answer_len = 46						# Longest answer sequence to parse (in train or val set)
 								self.n_classes = 2												# O or ANSWER
 
 								# Model saver
 								self.saver = None 
+								self.lr = None
 
 								# Encoder and decoder
 								self.encoder = encoder
@@ -299,7 +313,6 @@ class QASystem(object):
 								self.end_answer_placeholder = tf.placeholder(tf.int32, (None, self.max_context_len))
 
 								self.dropout_placeholder = tf.placeholder(tf.float32, ())
-								self.batch_size_placeholder = tf.placeholder(tf.int32, ())
 
 								# ==== assemble pieces ====
 								with tf.variable_scope("qa", initializer=tf.uniform_unit_scaling_initializer(1.0)):
@@ -319,13 +332,13 @@ class QASystem(object):
 					:return:
 					"""	
 					# Set up prediction op		
-					W = tf.get_variable("W", (3*self.embedding_size, 1)) 
-					W_prime = tf.get_variable("W_prime", (3*self.embedding_size, 1)) 
+					W = tf.get_variable("W", (3*self.state_size, 1)) 
+					W_prime = tf.get_variable("W_prime", (self.state_size, 1)) 
 					final_D = self.encoder.encode_v2(self.question_embeddings, self.context_embeddings, 
 																					self.question_mask_placeholder, self.context_mask_placeholder, 
-																					None, self.dropout_keep_prob, self.batch_size_placeholder)
+																					None, self.dropout_keep_prob)
 					
-					self.a_s_probs, self.a_e_probs = self.decoder.decode_v2(final_D, W, W_prime, self.context_mask_placeholder, self.embedding_size)
+					self.a_s_probs, self.a_e_probs = self.decoder.decode_v2(final_D, W, W_prime, self.context_mask_placeholder) 
 
 
 				def setup_loss(self):
@@ -347,8 +360,8 @@ class QASystem(object):
 								Clips the global norm of the gradients.
 								"""
 								# Update learning rate
-								lr = tf.train.exponential_decay(self.initial_learning_rate, self.global_step, 1000, 0.96)
-								opt = get_optimizer(self.optimizer)(learning_rate=lr)
+								self.lr = tf.train.exponential_decay(self.initial_learning_rate, self.global_step, 1000, 0.96)
+								opt = get_optimizer(self.optimizer)(learning_rate=self.lr)
 
 								# Get the gradients using optimizer.compute_gradients
 								self.gradients, params = zip(*opt.compute_gradients(self.loss))
@@ -408,9 +421,6 @@ class QASystem(object):
 								feed[self.start_answer_placeholder] = start_answer_batch
 								feed[self.end_answer_placeholder] = end_answer_batch
 								feed[self.dropout_placeholder] = dropout_keep_prob
-
-								self.batch_size = len(question_batch)
-								feed[self.batch_size_placeholder] = self.batch_size 
 
 								_, loss, grad_norm = session.run([self.train_op, self.loss, self.grad_norm], feed_dict=feed)
 								#_, loss = session.run([self.train_op, self.loss], feed_dict=feed)
@@ -485,9 +495,6 @@ class QASystem(object):
 								input_feed[self.dropout_placeholder] = 1.0
 								#input_feed[self.dropout_placeholder] = self.dropout_keep_prob
 
-								self.batch_size = len(question_batch)
-								input_feed[self.batch_size_placeholder] = self.batch_size 
-
 								_, loss, grad_norm = session.run([self.train_op, self.loss, self.grad_norm], feed_dict=input_feed)
 								a_s = self.a_s_probs.eval(feed_dict=input_feed, session=session)
 								a_e = self.a_e_probs.eval(feed_dict=input_feed, session=session)
@@ -503,7 +510,7 @@ class QASystem(object):
 
 								return a_s, a_e 
 
-				def validate(self, sess, valid_dataset):
+				def validate(self, session, dataset, model_path, model_name):
 								"""
 								Iterate through the validation dataset and determine what
 								the validation cost is.
@@ -515,15 +522,24 @@ class QASystem(object):
 
 								:return:
 								"""
-								valid_cost = 0
+								new_saver = tf.train.import_meta_graph(model_path + model_name)
+								new_saver.restore(session, tf.train.latest_checkpoint(model_path))
 
-								for valid_x, valid_y in valid_dataset:
-										valid_cost = self.test(sess, valid_x, valid_y)
+								f1s = []
+								ems = []
+								step = 1000
+								for start_idx in range(0, len(dataset['val']), step):
+									end_idx = min(start_idx + step, len(dataset['val']))
+									f1s_one_batch, ems_one_batch = self.evaluate_answer(session, dataset['val'][start_idx:end_idx], sample=None, log=True)
+									f1s += f1s_one_batch
+									ems += ems_one_batch
+								f1_total = sum(f1s) / float(len(f1s))
+								em_total = sum(ems) / float(len(ems))
+								print("Total f1: ", f1_total)
+								print("Total em: ", em_total)
 
 
-								return valid_cost
-
-				def evaluate_answer(self, session, dataset, sample=100, log=False):
+				def evaluate_answer(self, session, dataset, sample=100, log=False, shuffle=True):
 								"""
 								Evaluate the model's performance using the harmonic mean of F1 and Exact Match (EM)
 								with the set of true answer labels
@@ -538,8 +554,16 @@ class QASystem(object):
 								:param log: whether we print to std out stream
 								:return:
 								"""
-								random_indices = [random.randint(0, len(dataset)) for _ in range(sample)]
-								batch = [dataset[idx] for idx in random_indices]
+								# Evaluate on the whole set of data
+								batch = dataset
+								if sample is None:
+									sample = len(dataset)
+
+								else:	# If we only select a subset of the data
+									indices = range(sample)   # If not randomized
+									if shuffle:
+										indices = [random.randint(0, len(dataset)) for _ in range(sample)]
+									batch = [dataset[idx] for idx in indices]
 								question_batch, context_batch, question_mask_batch, context_mask_batch, start_answer_batch, end_answer_batch = zip(*batch)
 
 								a_s, a_e = self.answer(session, batch)		# These are both arrays of length sample size
@@ -568,7 +592,7 @@ class QASystem(object):
 								if log:
 												logging.info("F1: {}, EM: {}, for {} samples".format(f1, em, sample))
 
-								return f1, em
+								return f1s, ems
 
 				def train(self, session, dataset, train_dir):
 								"""
@@ -604,20 +628,29 @@ class QASystem(object):
 
 								init = tf.global_variables_initializer() 
 								session.run(init)
-								self.saver.save(session, self.train_dir + "/baselinev2_model_0") 
 
-								for epoch in range(self.epochs):		
+								#self.validate(session, dataset, 'train/', 'baselinev2_model_epoch_2_iter_6200.meta')
+								#exit()
+
+								training_losses = []
+								for epoch in range(200): #range(self.epochs):		
 										logging.info("Epoch %d out of %d", epoch + 1, self.epochs)
-										self.run_epoch(session, dataset['train'], epoch)
+										training_losses = self.run_epoch(session, dataset['train'], epoch, training_losses)
 
 										# Save model
-										self.saver.save(session, self.train_dir + "/baselinev2_model_epoch_" + str(epoch))
+										self.saver.save(session, self.train_dir + "/baselinev2_model_epoch_" + str(epoch+1))
 
 										tic = time.time()
 										params = tf.trainable_variables()
 										num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
 										toc = time.time()
 										logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
+										plot_losses(training_losses)
+
+								plot_losses(training_losses)
+								
+								# Run on the validation set when done training
+								self.evaluate_answer(session, dataset['val'], sample=None, log=True)
 
 				
 				# Some more preprocessing to make all the questions and context sequences the same length.
@@ -670,26 +703,44 @@ class QASystem(object):
 				# A single training example is a triplet: (question, context, answer). Each entry 
 				# of the triplet is a list of word IDs.
 				# Each batch only has training examples (no val examples).
-				def run_epoch(self, session, train_examples, epoch_no):
-								#for i, batch in enumerate(self.get_tiny_batches(train_examples)):
-								for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
+				def run_epoch(self, session, train_examples, epoch_no, training_losses):
+								batches = self.minibatches(train_examples, self.batch_size, shuffle=True)
+								#if epoch_no < 1:
+								#	print("Getting tiny batch on first epoch")
+								#	tiny_batch = self.get_tiny_batches(train_examples, sample=1000)
+								#	print("tiny batch len: ", len(tiny_batch))
+								#	batches = []
+								#	for i in range(20): # Equivalent of 20 epochs on the small dataset
+								#		batches += tiny_batch
+								#	print("len batches: ", len(batches))
+
+								for i, batch in enumerate(self.get_tiny_batches(train_examples, sample=200)):
+								#for i, batch in enumerate(batches):
 												print("Global step: ", self.global_step.eval())
 												loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob) #TODO	
-												#loss = self.optimize(session, batch, self.dropout_keep_prob)	
-												print("Loss: ", loss, " , grad norm: ", grad_norm)
-												#print("Loss: ", loss)
-				
+												loss_for_batch = sum(loss) / float(len(loss))
+												print("Loss: ", loss_for_batch, " , grad norm: ", grad_norm)
+												training_losses.append(loss_for_batch)			
+												print("LR: ", self.lr.eval())
+		
 												if (i % 100) == 0:
-														self.evaluate_answer(session, train_examples, sample=100, log=True)
-				
+														print("LR: ", self.lr.eval())
+														self.evaluate_answer(session, train_examples, sample=100, log=True, shuffle=True)
+														plot_losses(training_losses)
+
 												if (i % 1000) == 0:
 														# Save model
-														self.saver.save(session, self.train_dir + "/baselinev2_model_epoch_" + str(epoch_no) + "_iter_" + str(i))
+														self.saver.save(session, self.train_dir + "/baselinev2_model_epoch_" + str(epoch_no+1) + "_iter_" + str(i))
+								return training_losses
 
 
-				def get_tiny_batches(self, data):
-								return [data[0:10], data[10:20]]
-						
+				def get_tiny_batches(self, data, sample=20):
+					#return [data[0:10], data[10:20]]
+					ret = []
+					for start_idx in range(0, sample, self.batch_size):
+						ret.append(data[start_idx: start_idx + self.batch_size])
+					return ret					
+
 
 				# Partitioning code from: 
 				# http://stackoverflow.com/questions/2659900/python-slicing-a-list-into-n-nearly-equal-length-partitions
