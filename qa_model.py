@@ -198,17 +198,17 @@ class Decoder(object):
 
 				def decode_v2(self, final_D, W, W_prime, context_mask, embed_size): 
 					with vs.variable_scope("answer_start"):
-						a_s = tf.squeeze(matrix_multiply_with_batch(matrix=W, batch=final_D, matrixByBatch=False))		# a_s = final_D * W
+						a_s = tf.squeeze(matrix_multiply_with_batch(matrix=W, batch=tf.transpose(final_D, [0, 2, 1]), matrixByBatch=False))		# a_s = final_D * W
 						print("a_s: ", a_s)
 
 					with vs.variable_scope("answer_end"):
-						lstm_cell = tf.nn.rnn_cell.LSTMCell(3*embed_size)
+						lstm_cell = tf.nn.rnn_cell.LSTMCell(self.output_size)
 						context_length = tf.reduce_sum(tf.cast(context_mask, tf.int32), reduction_indices=1)
 						print("Context length: ", context_length)
 						final_D_prime, _ = dynamic_rnn(lstm_cell, final_D,
-															 						sequence_length=context_length, time_major=False, dtype=tf.float32)
+																					sequence_length=context_length, time_major=False, dtype=tf.float32)
 						print("final D prime: ", final_D_prime)
-						a_e = tf.squeeze(matrix_multiply_with_batch(matrix=W_prime, batch=final_D_prime, matrixByBatch=False))
+						a_e = tf.squeeze(matrix_multiply_with_batch(matrix=W_prime, batch=tf.transpose(final_D_prime, [0, 2, 1]), matrixByBatch=False))
 						print("a_e: ", a_e)
 
 					return (a_s, a_e)
@@ -244,7 +244,7 @@ class QASystem(object):
 								"""
 								# Dataset constants
 								self.max_question_len = 60				# Longest question sequence to parse (in train or val set)
-								self.max_context_len = 300				# Longest context sequence to parse (in train or val set): (766, truncated at 750)
+								self.max_context_len = 301				# Longest context sequence to parse (in train or val set): (766, truncated at 750)
 								self.max_answer_len = 46						# Longest answer sequence to parse (in train or val set)
 								self.n_classes = 2												# O or ANSWER
 
@@ -523,7 +523,7 @@ class QASystem(object):
 
 								return valid_cost
 
-				def evaluate_answer(self, session, dataset, sample=100, log=False):
+				def evaluate_answer(self, session, dataset, sample=100, log=False, shuffle=True):
 								"""
 								Evaluate the model's performance using the harmonic mean of F1 and Exact Match (EM)
 								with the set of true answer labels
@@ -538,8 +538,10 @@ class QASystem(object):
 								:param log: whether we print to std out stream
 								:return:
 								"""
-								random_indices = [random.randint(0, len(dataset)) for _ in range(sample)]
-								batch = [dataset[idx] for idx in random_indices]
+								indices = range(sample)
+								if shuffle:
+									indices = [random.randint(0, len(dataset)) for _ in range(sample)]
+								batch = [dataset[idx] for idx in indices]
 								question_batch, context_batch, question_mask_batch, context_mask_batch, start_answer_batch, end_answer_batch = zip(*batch)
 
 								a_s, a_e = self.answer(session, batch)		# These are both arrays of length sample size
@@ -606,7 +608,7 @@ class QASystem(object):
 								session.run(init)
 								self.saver.save(session, self.train_dir + "/baselinev2_model_0") 
 
-								for epoch in range(self.epochs):		
+								for epoch in range(100): #range(self.epochs):		
 										logging.info("Epoch %d out of %d", epoch + 1, self.epochs)
 										self.run_epoch(session, dataset['train'], epoch)
 
@@ -671,24 +673,26 @@ class QASystem(object):
 				# of the triplet is a list of word IDs.
 				# Each batch only has training examples (no val examples).
 				def run_epoch(self, session, train_examples, epoch_no):
-								#for i, batch in enumerate(self.get_tiny_batches(train_examples)):
-								for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
+								for i, batch in enumerate(self.get_tiny_batches(train_examples, sample=20)):
+								#for i, batch in enumerate(self.minibatches(train_examples, self.batch_size, shuffle=True)):
 												print("Global step: ", self.global_step.eval())
 												loss, grad_norm = self.optimize(session, batch, self.dropout_keep_prob) #TODO	
-												#loss = self.optimize(session, batch, self.dropout_keep_prob)	
 												print("Loss: ", loss, " , grad norm: ", grad_norm)
-												#print("Loss: ", loss)
 				
 												if (i % 100) == 0:
-														self.evaluate_answer(session, train_examples, sample=100, log=True)
+														self.evaluate_answer(session, train_examples, sample=20, log=True, shuffle=False)
 				
 												if (i % 1000) == 0:
 														# Save model
 														self.saver.save(session, self.train_dir + "/baselinev2_model_epoch_" + str(epoch_no) + "_iter_" + str(i))
 
 
-				def get_tiny_batches(self, data):
-								return [data[0:10], data[10:20]]
+				def get_tiny_batches(self, data, sample=20):
+					ret = []
+					step = self.batch_size
+					for start_idx in range(0, sample, step):
+						ret.append(data[start_idx: start_idx + step]) 
+					return ret
 						
 
 				# Partitioning code from: 
